@@ -4,11 +4,19 @@ metadata:
   name: kubectl-deploy
   namespace: tekforge
 spec:
-  description: "Deploy the image into the selected Kubernetes environment."
+  description: "Apply the application's Kubernetes manifest and update its container image."
   params:
     - name: image
       type: string
-      default: ""
+    - name: deployment-name
+      type: string
+      default: tekforge-app
+    - name: container-name
+      type: string
+      default: app
+    - name: namespace
+      type: string
+      default: tekforge
   workspaces:
     - name: source
   steps:
@@ -18,9 +26,14 @@ spec:
       script: |
         #!/bin/sh
         set -eu
-        if [ -f k8s/deployment.yaml ]; then
-          kubectl apply -f k8s/deployment.yaml
-          echo "Deployment manifest applied."
-        else
-          echo "No k8s/deployment.yaml found; platform would use the environment deployment strategy here."
+        if [ ! -f k8s/deployment.yaml ]; then
+          echo "No k8s/deployment.yaml found."
+          exit 1
         fi
+
+        kubectl apply -n "$(params.namespace)" -f k8s/deployment.yaml
+        kubectl -n "$(params.namespace)" set image \
+          "deployment/$(params.deployment-name)" \
+          "$(params.container-name)=$(params.image)"
+        kubectl -n "$(params.namespace)" rollout status \
+          "deployment/$(params.deployment-name)" --timeout=180s

@@ -53,6 +53,9 @@ spec:
       runAfter: [build-image]
       taskRef:
         name: kubectl-deploy
+      params:
+        - name: image
+          value: $(params.image)
       workspaces:
         - name: source
           workspace: source

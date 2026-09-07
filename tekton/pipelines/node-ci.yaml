@@ -1,0 +1,61 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: node-ci
+  namespace: tekforge
+spec:
+  description: "TekForge starter pipeline: checkout, test, security, image build, deploy."
+  params:
+    - name: repo-url
+      type: string
+    - name: revision
+      type: string
+      default: main
+    - name: image
+      type: string
+  tasks:
+    - name: checkout
+      taskRef:
+        name: git-clone
+      params:
+        - name: url
+          value: $(params.repo-url)
+        - name: revision
+          value: $(params.revision)
+      workspaces:
+        - name: output
+          workspace: source
+    - name: test
+      runAfter: [checkout]
+      taskRef:
+        name: npm-test
+      workspaces:
+        - name: source
+          workspace: source
+    - name: security
+      runAfter: [checkout]
+      taskRef:
+        name: trivy-scanner
+      workspaces:
+        - name: source
+          workspace: source
+    - name: build-image
+      runAfter: [test, security]
+      taskRef:
+        name: kaniko-build
+      params:
+        - name: IMAGE
+          value: $(params.image)
+      workspaces:
+        - name: source
+          workspace: source
+    - name: deploy
+      runAfter: [build-image]
+      taskRef:
+        name: kubectl-deploy
+      workspaces:
+        - name: source
+          workspace: source
+  workspaces:
+    - name: source
+      description: "Shared source workspace used by build and scan tasks."

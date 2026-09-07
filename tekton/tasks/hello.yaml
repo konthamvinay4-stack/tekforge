@@ -1,0 +1,17 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: tf-hello
+  namespace: tekforge
+spec:
+  description: "Small smoke-test task used to verify TekForge can execute Tekton."
+  params:
+    - name: message
+      type: string
+      default: "TekForge is connected to Tekton"
+  steps:
+    - name: run
+      image: alpine:3.20
+      script: |
+        #!/bin/sh
+        echo "$(params.message)"

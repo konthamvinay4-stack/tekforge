@@ -1,0 +1,26 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: kubectl-deploy
+  namespace: tekforge
+spec:
+  description: "Deploy the image into the selected Kubernetes environment."
+  params:
+    - name: image
+      type: string
+      default: ""
+  workspaces:
+    - name: source
+  steps:
+    - name: deploy
+      image: bitnami/kubectl:1.34
+      workingDir: $(workspaces.source.path)
+      script: |
+        #!/bin/sh
+        set -eu
+        if [ -f k8s/deployment.yaml ]; then
+          kubectl apply -f k8s/deployment.yaml
+          echo "Deployment manifest applied."
+        else
+          echo "No k8s/deployment.yaml found; platform would use the environment deployment strategy here."
+        fi

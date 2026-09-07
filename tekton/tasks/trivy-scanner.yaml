@@ -1,0 +1,17 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: trivy-scanner
+  namespace: tekforge
+spec:
+  description: "Scan application source for known vulnerabilities before image creation."
+  workspaces:
+    - name: source
+  steps:
+    - name: scan
+      image: aquasec/trivy:0.66.0
+      workingDir: $(workspaces.source.path)
+      script: |
+        #!/bin/sh
+        set -eu
+        trivy fs --exit-code 1 --severity HIGH,CRITICAL .

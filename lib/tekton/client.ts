@@ -17,14 +17,9 @@ function bearerToken() {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = bearerToken();
   if (!token) throw new Error("TEKTON_BEARER_TOKEN is not configured");
-
   const response = await fetch(`${baseUrl()}${path}`, {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      ...(init?.headers || {}),
-    },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(init?.headers || {}) },
     cache: "no-store",
   });
   const text = await response.text();
@@ -67,45 +62,29 @@ export async function createPipelineRun(input: {
         { name: "runtime-image", value: runtimeImages[input.runtime || "nodejs"] || "ubuntu:24.04" },
         { name: "test-command", value: input.testCommand || "" },
       ],
-      workspaces: [
-        { name: "source", emptyDir: {} },
-      ],
+      workspaces: [{ name: "source", emptyDir: {} }],
     },
   };
-
-  return request<TektonPipelineRun>(`/apis/tekton.dev/v1/namespaces/${namespace()}/pipelineruns`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  return request<TektonPipelineRun>(`/apis/tekton.dev/v1/namespaces/${namespace()}/pipelineruns`, { method: "POST", body: JSON.stringify(body) });
 }
 
 function conditionStatus(conditions: Array<{ type?: string; status?: string; reason?: string; message?: string }> = []) {
   const ready = conditions.find((condition) => condition.type === "Succeeded");
   if (!ready) return { status: "Unknown" as const };
   if (ready.status === "True") return { status: "Succeeded" as const, message: ready.message };
-  if (ready.status === "False") {
-    if (/cancel/i.test(`${ready.reason} ${ready.message}`)) return { status: "Cancelled" as const, message: ready.message };
-    return { status: "Failed" as const, message: ready.message };
-  }
+  if (ready.status === "False") return { status: /cancel/i.test(`${ready.reason} ${ready.message}`) ? "Cancelled" as const : "Failed" as const, message: ready.message };
   return { status: "Running" as const, message: ready.message };
 }
 
 export async function getPipelineRun(runName: string): Promise<TektonPipelineStatus> {
   const result = await request<any>(`/apis/tekton.dev/v1/namespaces/${namespace()}/pipelineruns/${encodeURIComponent(runName)}`);
   const condition = conditionStatus(result.status?.conditions);
-  const tasks = (result.status?.childReferences || []).map((task: any) => ({
-    name: task.pipelineTaskName || task.name,
-    status: "Unknown" as const,
-  }));
-  return {
-    name: result.metadata.name,
-    namespace: result.metadata.namespace,
-    status: condition.status,
-    message: condition.message,
-    startedAt: result.status?.startTime,
-    completedAt: result.status?.completionTime,
-    tasks,
-  };
+  const taskRuns = await request<any>(`/apis/tekton.dev/v1/namespaces/${namespace()}/taskruns?labelSelector=${encodeURIComponent(`tekton.dev/pipelineRun=${runName}`)}`);
+  const tasks = (taskRuns.items || []).map((task: any) => {
+    const taskCondition = conditionStatus(task.status?.conditions);
+    return { name: task.metadata?.labels?.["tekton.dev/pipelineTask" ] || task.metadata?.name, status: taskCondition.status, message: taskCondition.message };
+  });
+  return { name: result.metadata.name, namespace: result.metadata.namespace, status: condition.status, message: condition.message, startedAt: result.status?.startTime, completedAt: result.status?.completionTime, tasks };
 }
 
 export async function cancelPipelineRun(runName: string) {

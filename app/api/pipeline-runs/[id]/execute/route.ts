@@ -8,25 +8,27 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
 
   const { data: run, error: runError } = await supabase
     .from("pipeline_runs")
-    .select("*, pipelines(name, tekton_pipeline_name, applications(name, repository_url, default_branch, image_repository))")
+    .select("*, pipelines(name, tekton_pipeline_name, applications(name, repository_url, default_branch, image_repository, runtime, test_command))")
     .eq("id", id)
     .single();
 
   if (runError || !run) return NextResponse.json({ error: runError?.message || "Pipeline run not found" }, { status: 404 });
 
-  const pipelineName = run.pipelines?.tekton_pipeline_name || run.pipelines?.name;
-  const image = run.pipelines?.applications?.image_repository;
-  if (!pipelineName) return NextResponse.json({ error: "No Tekton pipeline is configured for this run." }, { status: 400 });
+  const pipelineName = run.pipelines?.tekton_pipeline_name || run.pipelines?.name || "node-ci";
+  const application = run.pipelines?.applications;
+  const image = application?.image_repository;
   if (!image) return NextResponse.json({ error: "No container image repository is configured for this application." }, { status: 400 });
 
   try {
     const tekton = await createPipelineRun({
       pipelineName,
       runName: `tekforge-${id.slice(0, 8)}`,
-      repoUrl: run.pipelines?.applications?.repository_url,
-      branch: run.branch || run.pipelines?.applications?.default_branch || "main",
+      repoUrl: application?.repository_url,
+      branch: run.branch || application?.default_branch || "main",
       commitSha: run.commit_sha || undefined,
       image,
+      runtime: application?.runtime || "nodejs",
+      testCommand: application?.test_command || "",
     });
 
     const { data: updated, error } = await supabase

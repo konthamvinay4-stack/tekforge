@@ -30,25 +30,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 const runtimeImages: Record<string, string> = {
   nodejs: "node:22-alpine",
   python: "python:3.13-slim",
-  java: "maven:3.9-eclipse-temurin-21",
+  java: "eclipse-temurin:21-jdk",
   go: "golang:1.24",
   rust: "rust:1.88",
 };
 
-export async function createPipelineRun(input: {
-  pipelineName: string;
-  runName?: string;
-  commitSha?: string;
-  repoUrl?: string;
-  branch?: string;
-  image?: string;
-  runtime?: string;
-  testCommand?: string;
-}) {
+export async function createPipelineRun(input: { pipelineName: string; runName?: string; commitSha?: string; repoUrl?: string; branch?: string; image?: string; runtime?: string; testCommand?: string }) {
   const name = input.runName || `tekforge-${Date.now()}`;
   if (!input.repoUrl) throw new Error("Application repository URL is required");
   if (!input.image) throw new Error("Application image repository is required");
-
   const body: TektonPipelineRun = {
     apiVersion: "tekton.dev/v1",
     kind: "PipelineRun",
@@ -82,15 +72,11 @@ export async function getPipelineRun(runName: string): Promise<TektonPipelineSta
   const taskRuns = await request<any>(`/apis/tekton.dev/v1/namespaces/${namespace()}/taskruns?labelSelector=${encodeURIComponent(`tekton.dev/pipelineRun=${runName}`)}`);
   const tasks = (taskRuns.items || []).map((task: any) => {
     const taskCondition = conditionStatus(task.status?.conditions);
-    return { name: task.metadata?.labels?.["tekton.dev/pipelineTask" ] || task.metadata?.name, status: taskCondition.status, message: taskCondition.message };
+    return { name: task.metadata?.labels?.["tekton.dev/pipelineTask"] || task.metadata?.name, status: taskCondition.status, message: taskCondition.message };
   });
   return { name: result.metadata.name, namespace: result.metadata.namespace, status: condition.status, message: condition.message, startedAt: result.status?.startTime, completedAt: result.status?.completionTime, tasks };
 }
 
 export async function cancelPipelineRun(runName: string) {
-  return request(`/apis/tekton.dev/v1/namespaces/${namespace()}/pipelineruns/${encodeURIComponent(runName)}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/merge-patch+json" },
-    body: JSON.stringify({ spec: { status: "Cancelled" } }),
-  });
+  return request(`/apis/tekton.dev/v1/namespaces/${namespace()}/pipelineruns/${encodeURIComponent(runName)}`, { method: "PATCH", headers: { "Content-Type": "application/merge-patch+json" }, body: JSON.stringify({ spec: { status: "Cancelled" } }) });
 }

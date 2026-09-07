@@ -4,7 +4,7 @@ metadata:
   name: kaniko-build
   namespace: tekforge
 spec:
-  description: "Build a container image from the application source. Registry credentials are injected by the platform."
+  description: "Build a container image from the application source. GKE Workload Identity provides registry credentials."
   params:
     - name: IMAGE
       type: string
@@ -12,7 +12,7 @@ spec:
     - name: source
   steps:
     - name: build
-      image: gcr.io/kaniko-project/executor:v1.23.2
+      image: gcr.io/kaniko-project/executor:v1.24.0
       args:
         - --context=$(workspaces.source.path)
         - --dockerfile=$(workspaces.source.path)/Dockerfile

@@ -1,0 +1,27 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: runtime-test
+  namespace: tekforge
+spec:
+  description: "Run the repository's detected test command using the matching runtime image."
+  params:
+    - name: runtime-image
+      type: string
+    - name: test-command
+      type: string
+  workspaces:
+    - name: source
+  steps:
+    - name: test
+      image: $(params.runtime-image)
+      workingDir: $(workspaces.source.path)
+      script: |
+        #!/bin/sh
+        set -eu
+        if [ -z "$(params.test-command)" ]; then
+          echo "No automated test command configured."
+          exit 0
+        fi
+        echo "Running: $(params.test-command)"
+        sh -c '$(params.test-command)'

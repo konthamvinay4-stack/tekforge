@@ -10,6 +10,7 @@ export type TektonPipelineRun = TektonObject & {
   spec: {
     pipelineRef: { name: string };
     params?: Array<{ name: string; value: string }>;
+    workspaces?: Array<{ name: string; emptyDir: Record<string, never> }>;
   };
 };
 

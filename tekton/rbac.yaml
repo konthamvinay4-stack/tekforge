@@ -3,8 +3,6 @@ kind: ServiceAccount
 metadata:
   name: tekforge-build
   namespace: tekforge
-  annotations:
-    iam.gke.io/gcp-service-account: tekforge-builder@REPLACE_PROJECT_ID.iam.gserviceaccount.com
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

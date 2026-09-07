@@ -10,10 +10,21 @@ function namespace() {
   return process.env.TEKFORGE_TEKTON_NAMESPACE || "tekforge";
 }
 
+function bearerToken() {
+  return process.env.TEKTON_BEARER_TOKEN;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = bearerToken();
+  if (!token) throw new Error("TEKTON_BEARER_TOKEN is not configured");
+
   const response = await fetch(`${baseUrl()}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      ...(init?.headers || {}),
+    },
     cache: "no-store",
   });
   const text = await response.text();
@@ -27,8 +38,12 @@ export async function createPipelineRun(input: {
   commitSha?: string;
   repoUrl?: string;
   branch?: string;
+  image?: string;
 }) {
   const name = input.runName || `tekforge-${Date.now()}`;
+  if (!input.repoUrl) throw new Error("Application repository URL is required");
+  if (!input.image) throw new Error("Application image repository is required");
+
   const body: TektonPipelineRun = {
     apiVersion: "tekton.dev/v1",
     kind: "PipelineRun",
@@ -36,9 +51,12 @@ export async function createPipelineRun(input: {
     spec: {
       pipelineRef: { name: input.pipelineName },
       params: [
-        ...(input.repoUrl ? [{ name: "repo-url", value: input.repoUrl }] : []),
-        ...(input.branch ? [{ name: "repo-revision", value: input.branch }] : []),
-        ...(input.commitSha ? [{ name: "commit-sha", value: input.commitSha }] : []),
+        { name: "repo-url", value: input.repoUrl },
+        { name: "revision", value: input.branch || "main" },
+        { name: "image", value: input.image },
+      ],
+      workspaces: [
+        { name: "source", emptyDir: {} },
       ],
     },
   };
@@ -63,8 +81,10 @@ function conditionStatus(conditions: Array<{ type?: string; status?: string; rea
 export async function getPipelineRun(runName: string): Promise<TektonPipelineStatus> {
   const result = await request<any>(`/apis/tekton.dev/v1/namespaces/${namespace()}/pipelineruns/${encodeURIComponent(runName)}`);
   const condition = conditionStatus(result.status?.conditions);
-  const taskStatuses = result.status?.childReferences || [];
-  const tasks = taskStatuses.map((task: any) => ({ name: task.pipelineTaskName || task.name, status: "Unknown" as const }));
+  const tasks = (result.status?.childReferences || []).map((task: any) => ({
+    name: task.pipelineTaskName || task.name,
+    status: "Unknown" as const,
+  }));
   return {
     name: result.metadata.name,
     namespace: result.metadata.namespace,

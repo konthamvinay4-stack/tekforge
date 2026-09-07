@@ -7,9 +7,6 @@ set -euo pipefail
 #   AR_LOCATION (default: GKE location)
 #   AR_REPOSITORY (default: tekforge)
 #   TEKFORGE_NAMESPACE (default: tekforge)
-#
-# This bootstrap intentionally does not create or print long-lived credentials.
-# TekForge build pods use GKE Workload Identity Federation.
 
 : "${GCP_PROJECT_ID:?Set GCP_PROJECT_ID}"
 : "${GKE_CLUSTER:?Set GKE_CLUSTER}"
@@ -27,7 +24,6 @@ PROJECT_NUMBER="$(gcloud projects describe "$GCP_PROJECT_ID" --format='value(pro
 printf '\n==> Selecting GCP project\n'
 gcloud config set project "$GCP_PROJECT_ID" >/dev/null
 
-printf '\n==> Enabling required APIs\n'
 gcloud services enable \
   container.googleapis.com \
   artifactregistry.googleapis.com \
@@ -38,11 +34,11 @@ gcloud container clusters get-credentials "$GKE_CLUSTER" \
   --location "$GKE_LOCATION" \
   --project "$GCP_PROJECT_ID"
 
-printf '\n==> Enabling Workload Identity Federation for GKE if needed\n'
+printf '\n==> Enabling Workload Identity Federation for GKE\n'
 gcloud container clusters update "$GKE_CLUSTER" \
   --location "$GKE_LOCATION" \
   --workload-pool="${GCP_PROJECT_ID}.svc.id.goog" \
-  --project "$GCP_PROJECT_ID" || true
+  --project "$GCP_PROJECT_ID"
 
 printf '\n==> Creating Artifact Registry repository if missing\n'
 if ! gcloud artifacts repositories describe "$AR_REPOSITORY" \
@@ -72,6 +68,8 @@ gcloud artifacts repositories add-iam-policy-binding "$AR_REPOSITORY" \
 printf '\n==> Creating TekForge namespace and Kubernetes service account\n'
 kubectl apply -f ../../tekton/namespace.yaml
 kubectl apply -f ../../tekton/rbac.yaml
+kubectl -n "$TEKFORGE_NAMESPACE" annotate serviceaccount "$KSA_NAME" \
+  "iam.gke.io/gcp-service-account=${GSA_EMAIL}" --overwrite
 
 printf '\n==> Binding Kubernetes service account to Google service account\n'
 gcloud iam service-accounts add-iam-policy-binding "$GSA_EMAIL" \
@@ -103,6 +101,6 @@ TekForge Kubernetes service account:
 Next:
   1. Configure Vercel server-side environment variables.
   2. Set TEKTON_API_URL to the GKE Kubernetes API endpoint.
-  3. Provide a short-lived Kubernetes service-account token through a secure secret-management path.
+  3. Use a short-lived Kubernetes service-account token or an authenticated in-cluster agent for Tekton API access.
   4. Set application image_repository values to the Artifact Registry path above.
 EOF

@@ -32,6 +32,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return text ? JSON.parse(text) as T : (undefined as T);
 }
 
+const runtimeImages: Record<string, string> = {
+  nodejs: "node:22-alpine",
+  python: "python:3.13-slim",
+  java: "maven:3.9-eclipse-temurin-21",
+  go: "golang:1.24",
+  rust: "rust:1.88",
+};
+
 export async function createPipelineRun(input: {
   pipelineName: string;
   runName?: string;
@@ -39,6 +47,8 @@ export async function createPipelineRun(input: {
   repoUrl?: string;
   branch?: string;
   image?: string;
+  runtime?: string;
+  testCommand?: string;
 }) {
   const name = input.runName || `tekforge-${Date.now()}`;
   if (!input.repoUrl) throw new Error("Application repository URL is required");
@@ -54,6 +64,8 @@ export async function createPipelineRun(input: {
         { name: "repo-url", value: input.repoUrl },
         { name: "revision", value: input.branch || "main" },
         { name: "image", value: input.image },
+        { name: "runtime-image", value: runtimeImages[input.runtime || "nodejs"] || "ubuntu:24.04" },
+        { name: "test-command", value: input.testCommand || "" },
       ],
       workspaces: [
         { name: "source", emptyDir: {} },

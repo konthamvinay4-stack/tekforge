@@ -10,10 +10,25 @@ function namespace() {
   return process.env.TEKFORGE_TEKTON_NAMESPACE || "tekforge";
 }
 
+function serviceAccountName() {
+  return process.env.TEKFORGE_TEKTON_SERVICE_ACCOUNT || "tekforge-build";
+}
+
+function token() {
+  return process.env.TEKTON_BEARER_TOKEN;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const authorization = token();
+  if (!authorization) throw new Error("TEKTON_BEARER_TOKEN is not configured");
+
   const response = await fetch(`${baseUrl()}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${authorization}`,
+      ...(init?.headers || {}),
+    },
     cache: "no-store",
   });
   const text = await response.text();
@@ -27,18 +42,29 @@ export async function createPipelineRun(input: {
   commitSha?: string;
   repoUrl?: string;
   branch?: string;
+  image?: string;
 }) {
   const name = input.runName || `tekforge-${Date.now()}`;
+  const params = [
+    ...(input.repoUrl ? [{ name: "repo-url", value: input.repoUrl }] : []),
+    ...(input.branch ? [{ name: "revision", value: input.branch }] : []),
+    ...(input.image ? [{ name: "image", value: input.image }] : []),
+    ...(input.commitSha ? [{ name: "commit-sha", value: input.commitSha }] : []),
+  ];
+
   const body: TektonPipelineRun = {
     apiVersion: "tekton.dev/v1",
     kind: "PipelineRun",
     metadata: { name, namespace: namespace() },
     spec: {
       pipelineRef: { name: input.pipelineName },
-      params: [
-        ...(input.repoUrl ? [{ name: "repo-url", value: input.repoUrl }] : []),
-        ...(input.branch ? [{ name: "repo-revision", value: input.branch }] : []),
-        ...(input.commitSha ? [{ name: "commit-sha", value: input.commitSha }] : []),
+      serviceAccountName: serviceAccountName(),
+      params,
+      workspaces: [
+        {
+          name: "source",
+          emptyDir: {},
+        },
       ],
     },
   };

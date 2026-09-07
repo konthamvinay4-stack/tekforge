@@ -17,7 +17,6 @@ spec:
     - name: checkout
       taskRef:
         name: git-clone
-        kind: ClusterTask
       params:
         - name: url
           value: $(params.repo-url)
@@ -43,7 +42,7 @@ spec:
     - name: build-image
       runAfter: [test, security]
       taskRef:
-        name: kaniko
+        name: kaniko-build
       params:
         - name: IMAGE
           value: $(params.image)

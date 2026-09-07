@@ -4,7 +4,7 @@ metadata:
   name: node-ci
   namespace: tekforge
 spec:
-  description: "TekForge starter pipeline: checkout, test, security, image build, deploy."
+  description: "TekForge runtime-aware pipeline: checkout, test, security, image build, deploy."
   params:
     - name: repo-url
       type: string
@@ -13,6 +13,12 @@ spec:
       default: main
     - name: image
       type: string
+    - name: runtime-image
+      type: string
+      default: node:22-alpine
+    - name: test-command
+      type: string
+      default: "npm test"
   tasks:
     - name: checkout
       taskRef:
@@ -28,7 +34,12 @@ spec:
     - name: test
       runAfter: [checkout]
       taskRef:
-        name: npm-test
+        name: runtime-test
+      params:
+        - name: runtime-image
+          value: $(params.runtime-image)
+        - name: test-command
+          value: $(params.test-command)
       workspaces:
         - name: source
           workspace: source
@@ -53,6 +64,9 @@ spec:
       runAfter: [build-image]
       taskRef:
         name: kubectl-deploy
+      params:
+        - name: image
+          value: $(params.image)
       workspaces:
         - name: source
           workspace: source

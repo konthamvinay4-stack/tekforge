@@ -4,10 +4,9 @@ import { createClient } from "@/lib/supabase/server";
 export async function GET(request: Request) {
   const projectId = new URL(request.url).searchParams.get("projectId");
   const supabase = await createClient();
-  let query = supabase.from("applications").select("*, projects(name)").order("created_at", { ascending: false });
+  let query = supabase.from("applications").select("*, projects(name), pipelines(id, name, tekton_pipeline_name, template)").order("created_at", { ascending: false });
   if (projectId) query = query.eq("project_id", projectId);
   const { data, error } = await query;
-
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ applications: data });
 }
@@ -19,7 +18,7 @@ export async function POST(request: Request) {
   if (missing.length) return NextResponse.json({ error: `Missing: ${missing.join(", ")}` }, { status: 400 });
 
   const supabase = await createClient();
-  const { data, error } = await supabase
+  const { data: application, error: applicationError } = await supabase
     .from("applications")
     .insert({
       project_id: body.projectId,
@@ -31,11 +30,35 @@ export async function POST(request: Request) {
       build_command: body.buildCommand || "npm ci",
       test_command: body.testCommand || "npm test",
       image_repository: body.imageRepository || null,
-      pipeline_status: "ready_to_generate",
+      pipeline_status: "ready",
     })
     .select()
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ application: data }, { status: 201 });
+  if (applicationError || !application) return NextResponse.json({ error: applicationError?.message || "Application creation failed" }, { status: 500 });
+
+  const pipelineName = `${application.name}-ci`;
+  const { data: pipeline, error: pipelineError } = await supabase
+    .from("pipelines")
+    .insert({
+      application_id: application.id,
+      name: pipelineName,
+      template: "node-ci",
+      tekton_pipeline_name: "node-ci",
+      spec: {
+        runtime: application.runtime,
+        runtimeVersion: application.runtime_version,
+        buildCommand: application.build_command,
+        testCommand: application.test_command,
+      },
+    })
+    .select()
+    .single();
+
+  if (pipelineError || !pipeline) {
+    await supabase.from("applications").delete().eq("id", application.id);
+    return NextResponse.json({ error: pipelineError?.message || "Pipeline creation failed" }, { status: 500 });
+  }
+
+  return NextResponse.json({ application, pipeline }, { status: 201 });
 }

@@ -1,0 +1,9 @@
+image:
+  repository: ghcr.io/tekforge/agent
+  tag: latest
+  pullPolicy: IfNotPresent
+agent:
+  controlPlaneUrl: ""
+  clusterId: ""
+  token: ""
+  heartbeatIntervalMs: "15000"

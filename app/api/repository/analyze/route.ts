@@ -165,7 +165,7 @@ export async function POST(request: Request) {
     } else if (names.has("pyproject.toml") || names.has("requirements.txt") || names.has("setup.py") || names.has("pipfile")) {
       runtime = "python"; buildTool = names.has("pyproject.toml") ? "pip/pyproject" : "pip";
       buildCommand = names.has("requirements.txt") ? "python -m pip install -r requirements.txt" : "python -m pip install -e .";
-      testCommand = names.has("pytest.ini") || names.has("tox.ini") || names.has("tests") ? "python -m pytest" : "python -m unittest discover";
+      testCommand = names.has("pytest.ini") || names.has("tox.ini") || entries.some((entry) => entry.type === "dir" && entry.name.toLowerCase() === "tests") ? "python -m pytest" : "python -m unittest discover";
       confidence = "high"; evidence.push("Python packaging/test markers detected");
       const pyproject = fileTexts.get("pyproject.toml") || "";
       runtimeVersion = inferVersion(pyproject, [/requires-python\s*=\s*[\"']>=?([0-9.]+)/i], "3.13");
@@ -193,7 +193,7 @@ export async function POST(request: Request) {
       entries.some((entry) => /^(deployment|service)\.ya?ml$/i.test(entry.name));
     const dockerfile = entries.find((entry) => entry.name.toLowerCase() === "dockerfile")?.path ?? null;
 
-    if (!dockerfile) warnings.push("A Dockerfile is required for the current image-build stage.");
+    if (!dockerfile) warnings.push("No Dockerfile detected. Add one or use a runtime-native image builder before enabling container deployment.");
     if (!testCommand) warnings.push("No automated test command was selected.");
 
     const analysis: Analysis = {

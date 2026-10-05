@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tekforge-agent.fullname" . }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "tekforge-agent.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "tekforge-agent.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ include "tekforge-agent.fullname" . }}
+      containers:
+        - name: agent
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: TEKFORGE_CONTROL_PLANE_URL
+              value: {{ .Values.agent.controlPlaneUrl | quote }}
+            - name: TEKFORGE_CLUSTER_ID
+              value: {{ .Values.agent.clusterId | quote }}
+            - name: TEKFORGE_AGENT_TOKEN
+              value: {{ .Values.agent.token | quote }}
+            - name: TEKFORGE_HEARTBEAT_INTERVAL_MS
+              value: {{ .Values.agent.heartbeatIntervalMs | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true

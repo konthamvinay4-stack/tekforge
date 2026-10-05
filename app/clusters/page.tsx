@@ -28,8 +28,8 @@ export default function ClustersPage() {
 
   const installCommand = useMemo(() => {
     if (!token || !clusterId) return "Generate an install command to continue.";
-    const image = process.env.NEXT_PUBLIC_TEKFORGE_AGENT_IMAGE || "ghcr.io/tekforge/agent:latest";
-    return `kubectl create namespace tekforge-system --dry-run=client -o yaml | kubectl apply -f -\nhelm upgrade --install tekforge-agent oci://ghcr.io/tekforge/charts/agent --namespace tekforge-system --set agent.controlPlaneUrl=${typeof window !== "undefined" ? window.location.origin : "https://your-tekforge-domain"} --set agent.clusterId=${clusterId} --set agent.token=${token} --set image.repository=${image.split(":")[0]} --set image.tag=${image.split(":")[1] || "latest"}`;
+    const base = typeof window !== "undefined" ? window.location.origin : "https://your-tekforge-domain";
+    return `kubectl apply -f \"${base}/api/agent/manifest?token=${encodeURIComponent(token)}\"`;
   }, [token, clusterId]);
 
   useEffect(() => {
@@ -78,6 +78,8 @@ export default function ClustersPage() {
     if (response.ok && data.cluster) {
       persist(clusters.map((cluster) => cluster.id === clusterId ? { ...cluster, ...data.cluster } : cluster));
       setMessage(data.cluster.status === "connected" ? "Agent heartbeat received." : "Agent has not connected yet.");
+    } else {
+      setMessage(data.error || "Status unavailable. Configure Supabase service-role persistence first.");
     }
   }
 

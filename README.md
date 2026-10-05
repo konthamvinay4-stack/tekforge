@@ -1,129 +1,131 @@
 # TekForge
 
-TekForge is a developer self-service CI/CD control plane built around Tekton on Kubernetes.
+TekForge is an agent-first Kubernetes application delivery platform. It combines cluster connectivity, repository intelligence, a visual pipeline studio, Tekton execution and deployment intelligence behind one control plane.
 
-The product direction is now **agent-first**: users connect AWS EKS, GCP GKE, Azure AKS, on-prem or local Kubernetes by installing a lightweight TekForge Agent inside the cluster. The control plane uses the agent for cluster inventory, Tekton execution, deployment telemetry and health without requiring direct inbound access to the Kubernetes API.
-
-## User experience
+## Product flow
 
 ```text
 Connect Kubernetes cluster
       ↓
 Install TekForge Agent
       ↓
-Agent heartbeat + cluster discovery
+Agent heartbeat + cluster inventory
       ↓
 Connect Git repository
       ↓
-TekForge analyzes the codebase
+Analyze application
       ↓
-Recommended pipeline generated
+Generate recommended pipeline
       ↓
 Visual Pipeline Studio
       ↓
-Git → Build → Test → Security → Image → Deploy
+Validate graph + compile
       ↓
-Compile visual graph → Tekton resources
+Tekton Pipeline / PipelineRun
       ↓
-Live PipelineRun / TaskRun / logs / events
+Live execution + logs + events
       ↓
-Deployment health + report + RCA
+Deployment health + release report + RCA
 ```
 
-## Product surfaces
+## Supported cluster model
 
-- **Clusters** — install the outbound agent and see Kubernetes/Tekton health.
-- **Applications** — connect a Git repository and detect runtime, build/test commands and deployment artifacts.
-- **Pipeline Studio** — drag tasks from the library onto a visual canvas, reorder stages and configure runtime/environment.
-- **Deployments** — execute compiled Tekton pipelines and expose rollout status.
-- **Reports** — aggregate build, security, deployment and cluster signals for a release.
-
-The current visual studio is intentionally platform-neutral. Its graph is the source of truth; a compiler maps the graph to Tekton Pipeline, Task and PipelineRun resources.
+TekForge is designed for AWS EKS, GCP GKE, Azure AKS, on-prem Kubernetes and local clusters. The control plane does not require inbound access to the customer Kubernetes API. The lightweight agent runs inside the cluster, uses its ServiceAccount for Kubernetes API access and sends heartbeat/telemetry outbound.
 
 ## Architecture
 
 ```text
                     TekForge Cloud
-┌────────────────────────────────────────────────────┐
-│ Web UI → Control Plane → Pipeline Compiler         │
-│                    │                               │
-│                    ├── Supabase / PostgreSQL       │
-│                    ├── Git provider integration    │
-│                    └── Agent registry              │
-└────────────────────┬───────────────────────────────┘
-                     │ outbound HTTPS
-          ┌──────────┼──────────┐
-          ▼          ▼          ▼
-       AWS EKS     GCP GKE    Local K8s
-          │          │          │
-       Agent       Agent      Agent
-          │          │          │
-       Tekton      Tekton     Tekton
-          │          │          │
-      Workloads  Workloads  Workloads
+┌────────────────────────────────────────────────────────┐
+│ Web UI                                                 │
+│  ├── Clusters                                          │
+│  ├── Applications / Repositories                       │
+│  ├── Pipeline Studio                                   │
+│  ├── Deployments / Runs                                │
+│  └── Reports / RCA                                     │
+│             │                                           │
+│             ▼                                           │
+│ Control Plane / API                                    │
+│  ├── Agent Registry                                    │
+│  ├── Repository Analyzer                               │
+│  ├── Pipeline Compiler                                 │
+│  ├── Policy / Validation                               │
+│  └── Persistence                                       │
+└─────────────┬──────────────────────────────────────────┘
+              │ outbound HTTPS
+       ┌──────┼─────────┐
+       ▼      ▼         ▼
+     EKS     GKE    Local / On-prem
+       │      │         │
+     Agent  Agent     Agent
+       │      │         │
+     Tekton Tekton    Tekton
+       │      │         │
+   Workloads Workloads Workloads
 ```
 
-The agent uses its Kubernetes ServiceAccount to call the in-cluster Kubernetes API. This follows the standard in-cluster Kubernetes API access pattern.
+## Pipeline Studio
 
-## Repository layout
+The visual graph is the platform source of truth. Users can add and connect source, build, test, security, image, approval and deployment stages. TekForge validates the graph and compiles it into Tekton resources.
+
+The editor is built on React Flow; the current dependency tracks the 12.11.x line. React Flow provides the node/edge interaction model required for a serious pipeline canvas.
+
+## Compiler
+
+`lib/pipeline-compiler.ts` defines a platform-neutral `PipelineGraph` and validates node IDs and dependency edges before generating Tekton YAML. `/api/pipelines/compile` exposes the compiler for the Studio and future pipeline persistence/execution workflows.
+
+The long-term compiler contract is:
 
 ```text
-app/                       Next.js control-plane UI
-app/api/                   API route handlers
-app/clusters/              Cluster + agent onboarding UI
-app/pipeline-studio/       Drag/drop visual pipeline studio
-agent/                     Lightweight Kubernetes agent
-charts/agent/              Helm chart for the agent
-supabase/migrations/       Cluster/agent persistence schema
-lib/                       Supabase and Tekton adapters
-tekton/                    Starter Tekton resources
-docs/                      Product and developer workflow documentation
+Visual Graph
+    ↓
+TekForge Pipeline Spec
+    ↓
+Policy validation
+    ↓
+Tekton compiler
+    ↓
+Task + Pipeline + PipelineRun
 ```
+
+Do not make Tekton YAML the UI source of truth. This keeps the product portable and allows future execution backends without redesigning the user experience.
 
 ## Agent
 
-The agent is designed for outbound-only connectivity. It currently reports:
+The current agent reports Kubernetes version, nodes, namespaces, pods, services, deployments, Tekton availability, PipelineRun/TaskRun counts and recent Kubernetes events. Its RBAC is read-only for the current telemetry phase.
 
-- Kubernetes version
-- node count
-- namespace count
-- pod count
-- Tekton availability
-- heartbeat timestamp
+The production roadmap adds short-lived identity rotation, signed commands, scoped execution permissions and explicit per-organization authorization before enabling remote mutation.
 
-The bootstrap flow is available at `/clusters`. The visual pipeline editor is available at `/pipeline-studio`.
+## Security direction
 
-The agent image is built by GitHub Actions and published to GHCR when `agent/**` changes.
+TekForge should remain outbound-first. Customer clusters should not expose the Kubernetes API to the public internet. Agent identity must be rotated and scoped. Pipeline execution should use least-privilege ServiceAccounts, admission/policy checks and signed artifacts.
 
-## Environment
-
-Add these server-only variables to Vercel/SaaS deployment:
-
-```text
-SUPABASE_SERVICE_ROLE_KEY=...
-TEKFORGE_AGENT_SIGNING_SECRET=...
-TEKFORGE_AGENT_IMAGE=ghcr.io/konthamvinay4-stack/tekforge-agent:latest
-```
-
-Apply `supabase/migrations/202610050001_agent_clusters.sql` before enabling persistent agent status.
+Tekton Chains is the intended supply-chain security integration for signed TaskRun/PipelineRun metadata, image signatures and attestations. Tekton's current release line includes security hardening and improved tracing, so the agent/compiler should target the current supported Tekton API rather than older beta resources.
 
 ## Current MVP
 
-- Friendly CI/CD dashboard
-- Repository analysis
-- Application/project persistence
 - Agent-based cluster onboarding
 - Cluster heartbeat and inventory
-- Visual drag/drop Pipeline Studio
+- Repository/application persistence
+- Visual drag-and-drop Pipeline Studio
 - Platform-neutral pipeline graph
-- Tekton pipeline execution adapter
-- Git checkout Task
-- npm test Task
-- Trivy source scan Task
-- Kaniko image build Task
-- Kubernetes deployment Task
+- Tekton compiler preview API
+- Tekton execution adapter
+- Git checkout, test, security, image and Kubernetes deployment tasks
+- Pipeline run status/cancel endpoints
 
-Production hardening still required: user/org authorization, per-organization cluster ownership policies, stronger agent identity/rotation, encrypted secret handling, log streaming, compiler validation, and full deployment/report persistence.
+## Next platform upgrades
+
+1. GitHub/GitLab/Bitbucket OAuth and repository analysis.
+2. AI-generated pipeline recommendations with deterministic policy validation.
+3. Agent command channel for PipelineRun creation, cancellation and log streaming.
+4. Pipeline execution timeline with TaskRun logs/events.
+5. Environment promotion DEV → QA → STAGING → PROD with approvals.
+6. Artifact registry integrations and immutable image digests.
+7. Trivy/SAST/SBOM/Cosign + Tekton Chains supply-chain evidence.
+8. Kubernetes deployment health, rollout verification and automatic rollback.
+9. Gateway API-based application exposure where supported; Gateway API has become the modern Kubernetes networking API and current releases continue moving features to Standard.
+10. Multi-tenant RBAC, audit trail, secrets integration and organization policy.
 
 ## Local development
 
@@ -140,4 +142,4 @@ http://localhost:3000/clusters
 http://localhost:3000/pipeline-studio
 ```
 
-For the legacy local Tekton adapter, `kubectl proxy --port=8001` can still be used. The long-term SaaS path is the TekForge Agent.
+For legacy local Tekton development, `kubectl proxy --port=8001` remains supported. The target SaaS architecture is the TekForge Agent.

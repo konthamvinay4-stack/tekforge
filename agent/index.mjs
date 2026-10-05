@@ -12,6 +12,7 @@ const controlPlane = (process.env.TEKFORGE_CONTROL_PLANE_URL || "").replace(/\/$
 const clusterId = process.env.TEKFORGE_CLUSTER_ID;
 const agentToken = process.env.TEKFORGE_AGENT_TOKEN;
 const intervalMs = Math.max(Number(process.env.TEKFORGE_HEARTBEAT_INTERVAL_MS || 15000), 5000);
+const pollMs = Math.max(Number(process.env.TEKFORGE_COMMAND_POLL_MS || 5000), 3000);
 
 if (!controlPlane || !clusterId || !agentToken) {
   throw new Error("TEKFORGE_CONTROL_PLANE_URL, TEKFORGE_CLUSTER_ID and TEKFORGE_AGENT_TOKEN are required");
@@ -56,56 +57,54 @@ async function optional(path) {
 
 async function snapshot() {
   const [version, nodes, namespaces, pods, services, deployments, events, tektonPipelines, pipelineRuns, taskRuns] = await Promise.all([
-    kube("/version"),
-    kube("/api/v1/nodes"),
-    kube("/api/v1/namespaces"),
-    kube("/api/v1/pods"),
-    optional("/api/v1/services"),
-    optional("/apis/apps/v1/deployments"),
-    optional("/api/v1/events?limit=50"),
-    optional("/apis/tekton.dev/v1/pipelines"),
-    optional("/apis/tekton.dev/v1/pipelineruns"),
-    optional("/apis/tekton.dev/v1/taskruns"),
+    kube("/version"), kube("/api/v1/nodes"), kube("/api/v1/namespaces"), kube("/api/v1/pods"),
+    optional("/api/v1/services"), optional("/apis/apps/v1/deployments"), optional("/api/v1/events?limit=50"),
+    optional("/apis/tekton.dev/v1/pipelines"), optional("/apis/tekton.dev/v1/pipelineruns"), optional("/apis/tekton.dev/v1/taskruns"),
   ]);
-
   const readyDeployments = (deployments?.items || []).filter((item) => item.status?.readyReplicas === item.status?.replicas && (item.status?.replicas || 0) > 0).length;
-  const recentEvents = (events?.items || []).slice(-25).map((event) => ({
-    type: event.type,
-    reason: event.reason,
-    message: event.message,
-    namespace: event.metadata?.namespace,
-    involvedKind: event.involvedObject?.kind,
-    involvedName: event.involvedObject?.name,
-    lastTimestamp: event.lastTimestamp || event.eventTime,
-  }));
-
+  const recentEvents = (events?.items || []).slice(-25).map((event) => ({ type: event.type, reason: event.reason, message: event.message, namespace: event.metadata?.namespace, involvedKind: event.involvedObject?.kind, involvedName: event.involvedObject?.name, lastTimestamp: event.lastTimestamp || event.eventTime }));
   return {
-    kubernetesVersion: version.gitVersion || version.gitVersionShort || "unknown",
-    nodes: nodes.items?.length || 0,
-    namespaces: namespaces.items?.length || 0,
-    pods: pods.items?.length || 0,
-    services: services?.items?.length || 0,
-    deployments: deployments?.items?.length || 0,
-    healthyDeployments: readyDeployments,
-    tekton: Boolean(tektonPipelines),
-    pipelineCount: tektonPipelines?.items?.length || 0,
-    pipelineRunCount: pipelineRuns?.items?.length || 0,
-    taskRunCount: taskRuns?.items?.length || 0,
-    recentEvents,
-    agentNamespace: namespace,
-    observedAt: new Date().toISOString(),
+    kubernetesVersion: version.gitVersion || version.gitVersionShort || "unknown", nodes: nodes.items?.length || 0,
+    namespaces: namespaces.items?.length || 0, pods: pods.items?.length || 0, services: services?.items?.length || 0,
+    deployments: deployments?.items?.length || 0, healthyDeployments: readyDeployments, tekton: Boolean(tektonPipelines),
+    pipelineCount: tektonPipelines?.items?.length || 0, pipelineRunCount: pipelineRuns?.items?.length || 0,
+    taskRunCount: taskRuns?.items?.length || 0, recentEvents, agentNamespace: namespace, observedAt: new Date().toISOString(),
   };
 }
 
+async function executeReadCommand(command) {
+  const payload = command.payload || {};
+  if (command.type !== "get-pipelinerun") throw new Error(`Unsupported agent command: ${command.type}`);
+  const targetNamespace = String(payload.namespace || namespace);
+  if (!/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(targetNamespace)) throw new Error("Invalid namespace");
+  const name = String(payload.name || "").trim();
+  if (!/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(name)) throw new Error("Invalid PipelineRun name");
+  const resource = await kube(`/apis/tekton.dev/v1/namespaces/${encodeURIComponent(targetNamespace)}/pipelineruns/${encodeURIComponent(name)}`);
+  return { operation: command.type, namespace: targetNamespace, resource };
+}
+
 async function heartbeat() {
+  try { const cluster = await snapshot(); await post("/api/agent/heartbeat", { clusterId, cluster }); console.log(JSON.stringify({ level: "info", message: "heartbeat sent", clusterId, ...cluster })); }
+  catch (error) { console.error(JSON.stringify({ level: "error", message: error instanceof Error ? error.message : String(error) })); }
+}
+
+async function pollCommands() {
   try {
-    const cluster = await snapshot();
-    await post("/api/agent/heartbeat", { clusterId, cluster });
-    console.log(JSON.stringify({ level: "info", message: "heartbeat sent", clusterId, ...cluster }));
-  } catch (error) {
-    console.error(JSON.stringify({ level: "error", message: error instanceof Error ? error.message : String(error) }));
-  }
+    const response = await fetch(`${controlPlane}/api/agent/commands`, { headers: { Authorization: `Bearer ${agentToken}` }, signal: AbortSignal.timeout(10000) });
+    if (!response.ok) throw new Error(`Command poll ${response.status}`);
+    const body = await response.json();
+    for (const command of body.commands || []) {
+      try {
+        const result = await executeReadCommand(command);
+        await post("/api/agent/commands/result", { commandId: command.id, status: "completed", result });
+      } catch (error) {
+        await post("/api/agent/commands/result", { commandId: command.id, status: "failed", error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+  } catch (error) { console.error(JSON.stringify({ level: "warn", message: error instanceof Error ? error.message : String(error) })); }
 }
 
 await heartbeat();
 setInterval(heartbeat, intervalMs);
+setInterval(pollCommands, pollMs);
+await pollCommands();

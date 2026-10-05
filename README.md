@@ -63,7 +63,7 @@ The current visual studio is intentionally platform-neutral. Its graph is the so
       Workloads  Workloads  Workloads
 ```
 
-The agent uses its Kubernetes ServiceAccount to call the in-cluster Kubernetes API. Kubernetes documents this in-cluster pattern and the mounted ServiceAccount token/CA mechanism. citeturn1search1turn1search0
+The agent uses its Kubernetes ServiceAccount to call the in-cluster Kubernetes API. This follows the standard in-cluster Kubernetes API access pattern.
 
 ## Repository layout
 

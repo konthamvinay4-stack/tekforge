@@ -11,7 +11,7 @@ const apiBase = `https://${apiHost}:${apiPort}`;
 const controlPlane = (process.env.TEKFORGE_CONTROL_PLANE_URL || "").replace(/\/$/, "");
 const clusterId = process.env.TEKFORGE_CLUSTER_ID;
 const agentToken = process.env.TEKFORGE_AGENT_TOKEN;
-const intervalMs = Number(process.env.TEKFORGE_HEARTBEAT_INTERVAL_MS || 15000);
+const intervalMs = Math.max(Number(process.env.TEKFORGE_HEARTBEAT_INTERVAL_MS || 15000), 5000);
 
 if (!controlPlane || !clusterId || !agentToken) {
   throw new Error("TEKFORGE_CONTROL_PLANE_URL, TEKFORGE_CLUSTER_ID and TEKFORGE_AGENT_TOKEN are required");
@@ -29,6 +29,7 @@ function kube(path) {
       });
     });
     request.on("error", reject);
+    request.setTimeout(10000, () => request.destroy(new Error("Kubernetes API timeout")));
     request.end();
   });
 }
@@ -43,25 +44,54 @@ function post(path, payload) {
       response.on("end", () => response.statusCode >= 200 && response.statusCode < 300 ? resolve(body) : reject(new Error(`Control plane ${response.statusCode}: ${body}`)));
     });
     request.on("error", reject);
+    request.setTimeout(10000, () => request.destroy(new Error("Control plane timeout")));
     request.write(data);
     request.end();
   });
 }
 
+async function optional(path) {
+  try { return await kube(path); } catch { return null; }
+}
+
 async function snapshot() {
-  const [version, nodes, namespaces, pods, tekton] = await Promise.all([
+  const [version, nodes, namespaces, pods, services, deployments, events, tektonPipelines, pipelineRuns, taskRuns] = await Promise.all([
     kube("/version"),
     kube("/api/v1/nodes"),
     kube("/api/v1/namespaces"),
     kube("/api/v1/pods"),
-    kube("/apis/tekton.dev/v1/pipelines").catch(() => null),
+    optional("/api/v1/services"),
+    optional("/apis/apps/v1/deployments"),
+    optional("/api/v1/events?limit=50"),
+    optional("/apis/tekton.dev/v1/pipelines"),
+    optional("/apis/tekton.dev/v1/pipelineruns"),
+    optional("/apis/tekton.dev/v1/taskruns"),
   ]);
+
+  const readyDeployments = (deployments?.items || []).filter((item) => item.status?.readyReplicas === item.status?.replicas && (item.status?.replicas || 0) > 0).length;
+  const recentEvents = (events?.items || []).slice(-25).map((event) => ({
+    type: event.type,
+    reason: event.reason,
+    message: event.message,
+    namespace: event.metadata?.namespace,
+    involvedKind: event.involvedObject?.kind,
+    involvedName: event.involvedObject?.name,
+    lastTimestamp: event.lastTimestamp || event.eventTime,
+  }));
+
   return {
     kubernetesVersion: version.gitVersion || version.gitVersionShort || "unknown",
     nodes: nodes.items?.length || 0,
     namespaces: namespaces.items?.length || 0,
     pods: pods.items?.length || 0,
-    tekton: Boolean(tekton),
+    services: services?.items?.length || 0,
+    deployments: deployments?.items?.length || 0,
+    healthyDeployments: readyDeployments,
+    tekton: Boolean(tektonPipelines),
+    pipelineCount: tektonPipelines?.items?.length || 0,
+    pipelineRunCount: pipelineRuns?.items?.length || 0,
+    taskRunCount: taskRuns?.items?.length || 0,
+    recentEvents,
     agentNamespace: namespace,
     observedAt: new Date().toISOString(),
   };

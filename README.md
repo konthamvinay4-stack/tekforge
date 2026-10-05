@@ -2,122 +2,128 @@
 
 TekForge is a developer self-service CI/CD control plane built around Tekton on Kubernetes.
 
-The goal is simple: a developer should be able to connect an application and understand exactly what the platform is doing without learning Tekton YAML.
+The product direction is now **agent-first**: users connect AWS EKS, GCP GKE, Azure AKS, on-prem or local Kubernetes by installing a lightweight TekForge Agent inside the cluster. The control plane uses the agent for cluster inventory, Tekton execution, deployment telemetry and health without requiring direct inbound access to the Kubernetes API.
 
 ## User experience
 
 ```text
-Connect repository
+Connect Kubernetes cluster
       ↓
-Choose runtime + deployment target
+Install TekForge Agent
       ↓
-TekForge generates a delivery plan
+Agent heartbeat + cluster discovery
       ↓
-Git push / Run now
+Connect Git repository
       ↓
-Checkout → Build → Test → Security → Image → Deploy
+TekForge analyzes the codebase
       ↓
-Live status + logs + findings
+Recommended pipeline generated
       ↓
-DEV → QA → approval → PROD
+Visual Pipeline Studio
+      ↓
+Git → Build → Test → Security → Image → Deploy
+      ↓
+Compile visual graph → Tekton resources
+      ↓
+Live PipelineRun / TaskRun / logs / events
+      ↓
+Deployment health + report + RCA
 ```
 
-Every screen is designed around three questions:
+## Product surfaces
 
-1. What is happening?
-2. Why is it happening?
-3. What happens next?
+- **Clusters** — install the outbound agent and see Kubernetes/Tekton health.
+- **Applications** — connect a Git repository and detect runtime, build/test commands and deployment artifacts.
+- **Pipeline Studio** — drag tasks from the library onto a visual canvas, reorder stages and configure runtime/environment.
+- **Deployments** — execute compiled Tekton pipelines and expose rollout status.
+- **Reports** — aggregate build, security, deployment and cluster signals for a release.
+
+The current visual studio is intentionally platform-neutral. Its graph is the source of truth; a compiler maps the graph to Tekton Pipeline, Task and PipelineRun resources.
 
 ## Architecture
 
 ```text
-Developer
-   │
-   ▼
-TekForge Web UI
-   │
-   ▼
-TekForge Control Plane / API
-   │
-   ├── PostgreSQL
-   ├── Git provider integration
-   └── Pipeline Compiler
-          │
-          ▼
-     Tekton resources
-          │
-          ▼
- Kubernetes
-   ├── Checkout
-   ├── Build + Test
-   ├── Security scanning
-   ├── Container build/push
-   └── Deployment
+                    TekForge Cloud
+┌────────────────────────────────────────────────────┐
+│ Web UI → Control Plane → Pipeline Compiler         │
+│                    │                               │
+│                    ├── Supabase / PostgreSQL       │
+│                    ├── Git provider integration    │
+│                    └── Agent registry              │
+└────────────────────┬───────────────────────────────┘
+                     │ outbound HTTPS
+          ┌──────────┼──────────┐
+          ▼          ▼          ▼
+       AWS EKS     GCP GKE    Local K8s
+          │          │          │
+       Agent       Agent      Agent
+          │          │          │
+       Tekton      Tekton     Tekton
+          │          │          │
+      Workloads  Workloads  Workloads
 ```
 
-Tekton's model is intentionally preserved: Tasks are executable building blocks, Pipelines compose Tasks, and a PipelineRun executes a Pipeline while exposing TaskRun status.
-
-Git-based automation uses Tekton Triggers: EventListener receives the event, TriggerBinding extracts event data, and TriggerTemplate creates the PipelineRun.
+The agent uses its Kubernetes ServiceAccount to call the in-cluster Kubernetes API. Kubernetes documents this in-cluster pattern and the mounted ServiceAccount token/CA mechanism. citeturn1search1turn1search0
 
 ## Repository layout
 
 ```text
-app/                    Next.js control-plane UI
-app/api/                API route handlers
-packages/types/         Canonical platform types
-tekton/tasks/           Reusable Tekton Tasks
-tekton/pipelines/       Pipeline definitions
-tekton/triggers/        Git event → PipelineRun definitions
-docs/                   Product and developer workflow documentation
+app/                       Next.js control-plane UI
+app/api/                   API route handlers
+app/clusters/              Cluster + agent onboarding UI
+app/pipeline-studio/       Drag/drop visual pipeline studio
+agent/                     Lightweight Kubernetes agent
+charts/agent/              Helm chart for the agent
+supabase/migrations/       Cluster/agent persistence schema
+lib/                       Supabase and Tekton adapters
+tekton/                    Starter Tekton resources
+docs/                      Product and developer workflow documentation
 ```
+
+## Agent
+
+The agent is designed for outbound-only connectivity. It currently reports:
+
+- Kubernetes version
+- node count
+- namespace count
+- pod count
+- Tekton availability
+- heartbeat timestamp
+
+The bootstrap flow is available at `/clusters`. The visual pipeline editor is available at `/pipeline-studio`.
+
+The agent image is built by GitHub Actions and published to GHCR when `agent/**` changes.
+
+## Environment
+
+Add these server-only variables to Vercel/SaaS deployment:
+
+```text
+SUPABASE_SERVICE_ROLE_KEY=...
+TEKFORGE_AGENT_SIGNING_SECRET=...
+TEKFORGE_AGENT_IMAGE=ghcr.io/konthamvinay4-stack/tekforge-agent:latest
+```
+
+Apply `supabase/migrations/202610050001_agent_clusters.sql` before enabling persistent agent status.
 
 ## Current MVP
 
 - Friendly CI/CD dashboard
-- Human-readable pipeline visualization
-- Recent run/status experience
-- Demo Run action that explains execution behavior
-- Health API
-- Node.js starter pipeline
+- Repository analysis
+- Application/project persistence
+- Agent-based cluster onboarding
+- Cluster heartbeat and inventory
+- Visual drag/drop Pipeline Studio
+- Platform-neutral pipeline graph
+- Tekton pipeline execution adapter
 - Git checkout Task
 - npm test Task
 - Trivy source scan Task
 - Kaniko image build Task
 - Kubernetes deployment Task
-- GitHub webhook TriggerBinding / TriggerTemplate / EventListener
-- Canonical `TekForgePipelineSpec`
 
-The Tekton manifests are starter resources; registry credentials, Git authentication, cluster RBAC, deployment manifests and environment-specific policy must be configured before production execution.
-
-## Next implementation phases
-
-### Phase 1 — Platform foundation
-- PostgreSQL persistence
-- Projects and Applications CRUD
-- Git repository connection
-- Environment model
-- Tekton API adapter
-
-### Phase 2 — Real execution
-- Create PipelineRun from the API
-- Watch PipelineRun and TaskRun status
-- Stream step logs
-- Store run history
-- Retry/cancel support
-
-### Phase 3 — Developer workflow
-- Pipeline Studio
-- Runtime templates for Java/Python/Go
-- DEV/QA/PROD promotion
-- Approval gates
-- Artifacts and deployment history
-
-### Phase 4 — Security and intelligence
-- SAST/dependency/container scanning
-- SBOM and provenance
-- Tekton Chains integration
-- Failure RCA using logs/events/history
-- Natural-language pipeline generation with policy validation
+Production hardening still required: user/org authorization, per-organization cluster ownership policies, stronger agent identity/rotation, encrypted secret handling, log streaming, compiler validation, and full deployment/report persistence.
 
 ## Local development
 
@@ -126,4 +132,12 @@ npm install
 npm run dev
 ```
 
-The current dashboard can be reviewed without a Kubernetes connection. Live execution requires Tekton Pipelines and Triggers installed on a Kubernetes cluster and the manifests under `tekton/` configured for the target environment.
+Open:
+
+```text
+http://localhost:3000
+http://localhost:3000/clusters
+http://localhost:3000/pipeline-studio
+```
+
+For the legacy local Tekton adapter, `kubectl proxy --port=8001` can still be used. The long-term SaaS path is the TekForge Agent.

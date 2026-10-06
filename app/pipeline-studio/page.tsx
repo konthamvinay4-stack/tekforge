@@ -38,7 +38,7 @@ type StageConfig = {
   strategy?: string;
   environment?: string;
   message?: string;
-  timeout?: string;\n  event?: string;\n  release?: string;\n  chart?: string;\n  values?: string;\n  application?: string;\n  revision?: string;\n  syncPolicy?: string;\n  check?: string;\n  endpoint?: string;\n  onFailure?: string;\n  channel?: string;\n  target?: string;\n  condition?: string;
+  timeout?: string;\n  event?: string;\n  release?: string;\n  chart?: string;\n  values?: string;\n  application?: string;\n  revision?: string;\n  syncPolicy?: string;\n  check?: string;\n  endpoint?: string;\n  onFailure?: string;\n  channel?: string;\nn  condition?: string;
 };
 
 type StageDefinition = {

@@ -190,7 +190,7 @@ export default function PipelineStudio() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const app = params.get("applicationId") || "";
-    const pipeline = params.get("pipelineId") || "";
+    const pipeline = params.get("pipelineId") || "";\n    const isNew = params.get("new") === "1";
     setApplicationId(app);
     setPipelineId(pipeline);
     Promise.all([

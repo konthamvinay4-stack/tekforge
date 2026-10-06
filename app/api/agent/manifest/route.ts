@@ -60,6 +60,35 @@ subjects:
   name: tekforge-agent
   namespace: tekforge-system
 ---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tekforge
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tekforge-agent-executor
+  namespace: tekforge
+rules:
+- apiGroups: ["tekton.dev"]
+  resources: ["pipelines", "tasks", "pipelineruns"]
+  verbs: ["get", "create", "update", "patch", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tekforge-agent-executor
+  namespace: tekforge
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tekforge-agent-executor
+subjects:
+- kind: ServiceAccount
+  name: tekforge-agent
+  namespace: tekforge-system
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -89,6 +118,8 @@ spec:
           value: "${token}"
         - name: TEKFORGE_HEARTBEAT_INTERVAL_MS
           value: "15000"
+        - name: TEKFORGE_EXECUTION_NAMESPACE
+          value: "tekforge"
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true

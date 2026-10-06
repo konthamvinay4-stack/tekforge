@@ -106,7 +106,7 @@ function StageCard({ data, selected }: NodeProps<StageNode>) {
   );
 }
 
-function nodeSummary(node: StageNode) {
+function nodeSummary(node: StageData) {
   const c = node.data.config || {};
   if (node.data.type === "source") return c.repository ? c.repository.replace(/^https?:\/\//, "") : "Configure repository";
   if (node.data.type === "build") return c.command || "Configure build command";

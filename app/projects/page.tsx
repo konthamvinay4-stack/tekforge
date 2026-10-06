@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type Project = { id: string; name: string; description: string | null; created_at: string };
 
@@ -87,7 +88,7 @@ export default function ProjectsPage() {
             <label className="metric-label">Git repository URL</label><input required placeholder="https://github.com/org/orders-api" value={repo} onChange={(e) => setRepo(e.target.value)} style={{ width: "100%", padding: 10, margin: "6px 0 12px", border: "1px solid #d6dde7", borderRadius: 8 }} />
             <button className="primary">Connect application</button>
           </form> : <p className="subtitle">Select or create a project to continue.</p>}
-          {applications.length > 0 && <div style={{ marginTop: 18 }}>{applications.map((app) => <div className="run" key={app.id}><span className="status green" /><div className="run-main"><div className="run-title">{app.name}</div><div className="run-meta">{app.repository_url} · {app.runtime} {app.runtime_version}</div></div><span className="badge success">connected</span></div>)}</div>}
+          {applications.length > 0 && <div style={{ marginTop: 18 }}>{applications.map((app) => <div className="run" key={app.id}><span className="status green" /><div className="run-main"><div className="run-title">{app.name}</div><div className="run-meta">{app.repository_url} · {app.runtime} {app.runtime_version}</div></div><span className="badge success">connected</span><button className="secondary" onClick={() => router.push("/applications/" + app.id)}>Open application</button></div>)}</div>}
         </div>
       </section>
       {message && <div className="helper" style={{ marginTop: 16 }}>{message}</div>}

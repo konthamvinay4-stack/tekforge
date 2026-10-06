@@ -20,7 +20,7 @@ export async function POST(request: Request) {
 
     if (body.clusterId) {
       const namespace = body.namespace || "tekforge";
-      const pipelineName = pipeline.tekton_pipeline_name || pipeline.name;
+      const pipelineName = (pipeline.tekton_pipeline_name || pipeline.name).toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "tekforge-pipeline";
       const runName = `tekforge-${Date.now()}`;
       const params = [
         { name: "repository", value: application.repository_url },

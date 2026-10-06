@@ -85,6 +85,27 @@ async function executeCommand(command) {
   if (targetNamespace !== executionNamespace) throw new Error(`Execution is restricted to namespace ${executionNamespace}`);
   if (!validName(targetNamespace)) throw new Error("Invalid namespace");
 
+  if (command.type === "apply-pipeline") {
+    const resources = Array.isArray(payload.resources) ? payload.resources : [];
+    if (!resources.length) throw new Error("No Tekton resources supplied");
+    const results = [];
+    for (const resource of resources) {
+      const kind = String(resource.kind || "");
+      const name = String(resource.metadata?.name || "");
+      if (!["Pipeline", "Task"].includes(kind) || !validName(name)) throw new Error("Invalid Tekton resource");
+      const plural = kind === "Pipeline" ? "pipelines" : "tasks";
+      const path = `/apis/tekton.dev/v1/namespaces/${encodeURIComponent(targetNamespace)}/${plural}/${encodeURIComponent(name)}`;
+      try {
+        await kube(path);
+        results.push(await kube(path, { method: "PUT", body: { ...resource, metadata: { ...(resource.metadata || {}), name, namespace: targetNamespace } } }));
+      } catch (error) {
+        if (!String(error.message || error).includes("Kubernetes API 404")) throw error;
+        results.push(await kube(`/apis/tekton.dev/v1/namespaces/${encodeURIComponent(targetNamespace)}/${plural}`, { method: "POST", body: { ...resource, metadata: { ...(resource.metadata || {}), name, namespace: targetNamespace } } }));
+      }
+    }
+    return { operation: command.type, namespace: targetNamespace, resources: results };
+  }
+
   if (command.type === "get-pipelinerun") {
     const name = String(payload.name || "").trim();
     if (!validName(name)) throw new Error("Invalid PipelineRun name");

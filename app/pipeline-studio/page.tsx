@@ -17,8 +17,9 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { getTaskCatalogItem, taskCatalog } from "@/lib/task-catalog";
 
-type StageType = "trigger" | "source" | "build" | "test" | "security" | "image" | "deploy" | "helm" | "gitops" | "verify" | "approval" | "notify" | "rollback";
+type StageType = "trigger" | "source" | "build" | "test" | "quality" | "security" | "image" | "deploy" | "helm" | "gitops" | "verify" | "approval" | "notify" | "rollback";
 
 type StageConfig = {
   repository?: string;
@@ -27,8 +28,21 @@ type StageConfig = {
   buildTool?: string;
   command?: string;
   testCommand?: string;
+  tool?: string;
+  serverUrl?: string;
+  projectKey?: string;
+  organization?: string;
+  credentialSecret?: string;
+  sources?: string;
+  qualityGate?: string;
+  coverage?: boolean;
+  coveragePath?: string;
+  workingDirectory?: string;
+  baseUrl?: string;
+  severity?: string;
+  configPath?: string;
   scanners?: string[];
-  failOn?: string;
+  failOn?: string | boolean;
   registry?: string;
   image?: string;
   tag?: string;
@@ -76,8 +90,9 @@ const definitions: StageDefinition[] = [
   { type: "trigger", label: "Git Trigger", detail: "Start from a Git event", category: "Triggers", description: "Start this pipeline from a push, pull request, tag, or manual trigger.", icon: "⚡", defaults: { provider: "GitHub", event: "Push", branch: "main" } },
   { type: "source", label: "Git Checkout", detail: "Clone source from Git", category: "Source", description: "Fetch the selected repository and revision into the shared workspace.", icon: "⌘", defaults: { provider: "GitHub", repository: "", branch: "main" } },
   { type: "build", label: "Build", detail: "Compile the application", category: "Build", description: "Install dependencies and run the project's build command.", icon: "⚙", defaults: { buildTool: "Auto detect", command: "npm run build" } },
-  { type: "test", label: "Test", detail: "Run automated tests", category: "Quality", description: "Run unit, integration or custom verification commands.", icon: "✓", defaults: { testCommand: "npm test", timeout: "10m" } },
-  { type: "security", label: "Security Scan", detail: "Scan source and dependencies", category: "Security", description: "Scan source, dependencies, secrets, or images against your security policy.", icon: "◇", defaults: { scanners: ["Trivy"], failOn: "High or Critical" } },
+  { type: "test", label: "Test", detail: "Run automated tests", category: "Testing", description: "Choose a test framework and configure its command, coverage and environment.", icon: "✓", defaults: { tool: "test-command", testCommand: "npm test", timeout: "10m" } },
+  { type: "quality", label: "Code Quality", detail: "Analyze code quality", category: "Code Quality", description: "Connect SonarQube or SonarCloud and optionally fail the pipeline on a quality-gate failure.", icon: "⌁", defaults: { tool: "sonarqube", serverUrl: "", projectKey: "", credentialSecret: "", sources: ".", qualityGate: "Wait and fail", timeout: "10m" } },
+  { type: "security", label: "Security Scan", detail: "Scan source and dependencies", category: "Security", description: "Choose one or more reusable security scanners and define the failure policy.", icon: "◇", defaults: { tool: "trivy", scanners: ["Trivy"], severity: "HIGH,CRITICAL", failOn: "High or Critical" } },
   { type: "image", label: "Build Image", detail: "Build and push container", category: "Container", description: "Build the application image and publish it to a container registry.", icon: "▣", defaults: { registry: "Artifact Registry", image: "", tag: "$(commit)" } },
   { type: "deploy", label: "Kubernetes Deploy", detail: "Roll out to Kubernetes", category: "Delivery", description: "Apply Kubernetes manifests to a selected namespace.", icon: "↗", defaults: { target: "Kubernetes", namespace: "default", manifestPath: "k8s/", strategy: "Rolling" } },
   { type: "helm", label: "Helm Deploy", detail: "Install or upgrade a chart", category: "Delivery", description: "Deploy and manage Helm releases with configurable values and rollout behavior.", icon: "♢", defaults: { release: "", chart: "./helm", namespace: "default", values: "values.yaml", strategy: "Rolling" } },
@@ -97,7 +112,7 @@ function createNode(def: StageDefinition, index: number): StageNode {
   };
 }
 
-const initialNodes: StageNode[] = definitions.slice(1, 7).map(createNode);
+const initialNodes: StageNode[] = definitions.slice(1, 8).map(createNode);
 const initialEdges: Edge[] = initialNodes.slice(0, -1).map((node, index) => ({
   id: `${node.id}-${initialNodes[index + 1].id}`,
   source: node.id,
@@ -128,7 +143,8 @@ function nodeSummary(node: StageData) {
   const c = node.config || {};
   if (node.type === "source") return c.repository ? c.repository.replace(/^https?:\/\//, "") : "Configure repository";
   if (node.type === "build") return c.command || "Configure build command";
-  if (node.type === "test") return c.testCommand || "Configure tests";
+  if (node.type === "test") return `${c.tool || "Test"} · ${c.testCommand || "Configure tests"}`;
+  if (node.type === "quality") return c.projectKey ? `${c.tool || "SonarQube"} · ${c.projectKey}` : "Configure code quality";
   if (node.type === "security") return Array.isArray(c.scanners) ? c.scanners.join(" · ") : "Configure scanner";
   if (node.type === "image") return c.image ? `${c.image}:${c.tag || "latest"}` : "Configure image";
   if (node.type === "deploy") return `${c.target || "Kubernetes"} · ${c.namespace || "default"}`;
@@ -455,8 +471,9 @@ export default function PipelineStudio() {
         <div className="inspector-stage-head"><span className="inspector-icon">{def.icon}</span><div><div className="inspector-category">{def.category}</div><h2>{selected.data.label}</h2><p>{def.description}</p></div></div>
         {selected.data.type === "source" && <><Field label="Git provider"><select value={c.provider || "GitHub"} onChange={(e) => updateSelectedConfig("provider", e.target.value)}><option>GitHub</option><option>GitLab</option><option>Bitbucket</option></select></Field><Field label="Repository" hint="HTTPS or SSH repository URL"><input value={c.repository || ""} onChange={(e) => updateSelectedConfig("repository", e.target.value)} placeholder="https://github.com/org/repository" /></Field><Field label="Branch / revision"><input value={c.branch || "main"} onChange={(e) => updateSelectedConfig("branch", e.target.value)} placeholder="main" /></Field></>}
         {selected.data.type === "build" && <><Field label="Build system"><select value={c.buildTool || "Auto detect"} onChange={(e) => updateSelectedConfig("buildTool", e.target.value)}><option>Auto detect</option><option>npm</option><option>pnpm</option><option>yarn</option><option>Maven</option><option>Gradle</option><option>pip</option><option>Go</option></select></Field><Field label="Build command"><input value={c.command || ""} onChange={(e) => updateSelectedConfig("command", e.target.value)} placeholder="npm run build" /></Field></>}
-        {selected.data.type === "test" && <><Field label="Test command"><input value={c.testCommand || ""} onChange={(e) => updateSelectedConfig("testCommand", e.target.value)} placeholder="npm test" /></Field><Field label="Timeout"><select value={c.timeout || "10m"} onChange={(e) => updateSelectedConfig("timeout", e.target.value)}><option>5m</option><option>10m</option><option>20m</option><option>30m</option></select></Field></>}
-        {selected.data.type === "security" && <><div className="inspector-label">Scanners</div><div className="check-grid">{["Trivy","SAST","Dependency"].map((scanner) => <button type="button" key={scanner} className={`check-chip ${c.scanners?.includes(scanner) ? "checked" : ""}`} onClick={() => toggleScanner(scanner)}><span>{c.scanners?.includes(scanner) ? "✓" : ""}</span>{scanner}</button>)}</div><Field label="Fail pipeline on"><select value={c.failOn || "High or Critical"} onChange={(e) => updateSelectedConfig("failOn", e.target.value)}><option>Critical</option><option>High or Critical</option><option>Never</option></select></Field></>}
+        {selected.data.type === "test" && <><Field label="Testing tool"><select value={c.tool || "test-command"} onChange={(e) => { const tool = e.target.value; const item = getTaskCatalogItem(tool); updateSelectedConfig("tool", tool); if (item) { for (const field of item.fields) if (field.defaultValue !== undefined) updateSelectedConfig(field.key as keyof StageConfig, String(field.defaultValue)); } }}>{taskCatalog.filter((item) => item.category === "Testing").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><small>{getTaskCatalogItem(c.tool || "test-command")?.description}</small></Field><Field label="Test command"><input value={c.testCommand || ""} onChange={(e) => updateSelectedConfig("testCommand", e.target.value)} placeholder="npm test" /></Field><Field label="Coverage"><select value={c.coverage ? "yes" : "no"} onChange={(e) => updateSelectedConfig("coverage", e.target.value === "yes")}><option value="yes">Collect coverage</option><option value="no">Skip coverage</option></select></Field><Field label="Coverage output"><input value={c.coveragePath || ""} onChange={(e) => updateSelectedConfig("coveragePath", e.target.value)} placeholder="coverage/lcov.info" /></Field><Field label="Base URL (E2E)"><input value={c.baseUrl || ""} onChange={(e) => updateSelectedConfig("baseUrl", e.target.value)} placeholder="https://staging.example.com" /></Field><Field label="Timeout"><select value={c.timeout || "10m"} onChange={(e) => updateSelectedConfig("timeout", e.target.value)}><option>5m</option><option>10m</option><option>20m</option><option>30m</option><option>60m</option></select></Field></>}
+        {selected.data.type === "security" && <><Field label="Primary scanner"><select value={c.tool || "trivy"} onChange={(e) => updateSelectedConfig("tool", e.target.value)}><option value="trivy">Trivy</option><option value="gitleaks">Gitleaks</option><option value="dependency-scan">Dependency Scan</option></select></Field><div className="inspector-label">Additional scanners</div><div className="check-grid">{["Trivy","Gitleaks","Dependency"].map((scanner) => <button type="button" key={scanner} className={`check-chip ${c.scanners?.includes(scanner) ? "checked" : ""}`} onClick={() => toggleScanner(scanner)}><span>{c.scanners?.includes(scanner) ? "✓" : ""}</span>{scanner}</button>)}</div><Field label="Severity"><select value={c.severity || "HIGH,CRITICAL"} onChange={(e) => updateSelectedConfig("severity", e.target.value)}><option>CRITICAL</option><option>HIGH,CRITICAL</option><option>MEDIUM,HIGH,CRITICAL</option></select></Field><Field label="Fail pipeline on"><select value={String(c.failOn || "High or Critical")} onChange={(e) => updateSelectedConfig("failOn", e.target.value)}><option>Critical</option><option>High or Critical</option><option>Never</option></select></Field><Field label="Credential Secret (optional)"><input value={c.credentialSecret || ""} onChange={(e) => updateSelectedConfig("credentialSecret", e.target.value)} placeholder="registry-credentials" /></Field></>}
+        {selected.data.type === "quality" && <><Field label="Quality tool"><select value={c.tool || "sonarqube"} onChange={(e) => updateSelectedConfig("tool", e.target.value)}><option value="sonarqube">SonarQube</option><option value="sonarcloud">SonarCloud</option></select></Field><Field label="Server URL" hint="For self-hosted SonarQube use your reachable cluster URL"><input value={c.serverUrl || ""} onChange={(e) => updateSelectedConfig("serverUrl", e.target.value)} placeholder="https://sonarqube.example.com" /></Field><Field label="Project key"><input value={c.projectKey || ""} onChange={(e) => updateSelectedConfig("projectKey", e.target.value)} placeholder="my-service" /></Field><Field label="Organization (SonarCloud)"><input value={c.organization || ""} onChange={(e) => updateSelectedConfig("organization", e.target.value)} placeholder="my-org" /></Field><Field label="Kubernetes Secret" hint="Secret must contain SONAR_TOKEN. TekForge only stores the secret name."><input value={c.credentialSecret || ""} onChange={(e) => updateSelectedConfig("credentialSecret", e.target.value)} placeholder="sonarqube-credentials" /></Field><Field label="Sources"><input value={c.sources || "."} onChange={(e) => updateSelectedConfig("sources", e.target.value)} /></Field><Field label="Quality gate"><select value={c.qualityGate || "Wait and fail"} onChange={(e) => updateSelectedConfig("qualityGate", e.target.value)}><option>Wait and fail</option><option>Wait and warn</option><option>Do not wait</option></select></Field><Field label="Timeout"><select value={c.timeout || "10m"} onChange={(e) => updateSelectedConfig("timeout", e.target.value)}><option>5m</option><option>10m</option><option>20m</option><option>30m</option></select></Field></>}
         {selected.data.type === "image" && <><Field label="Container registry"><select value={c.registry || "Artifact Registry"} onChange={(e) => updateSelectedConfig("registry", e.target.value)}><option>Artifact Registry</option><option>Docker Hub</option><option>Amazon ECR</option><option>Google Artifact Registry</option><option>Custom registry</option></select></Field><Field label="Image repository"><input value={c.image || ""} onChange={(e) => updateSelectedConfig("image", e.target.value)} placeholder="us-central1-docker.pkg.dev/project/app" /></Field><Field label="Image tag"><input value={c.tag || "$(commit)"} onChange={(e) => updateSelectedConfig("tag", e.target.value)} placeholder="$(commit)" /></Field></>}
         {selected.data.type === "deploy" && <><Field label="Deployment target"><select value={c.target || "Kubernetes"} onChange={(e) => updateSelectedConfig("target", e.target.value)}><option>Kubernetes</option><option>Helm</option><option>Argo CD</option></select></Field><Field label="Namespace"><input value={c.namespace || "default"} onChange={(e) => updateSelectedConfig("namespace", e.target.value)} /></Field><Field label="Manifest / chart path"><input value={c.manifestPath || "k8s/"} onChange={(e) => updateSelectedConfig("manifestPath", e.target.value)} /></Field><Field label="Rollout strategy"><select value={c.strategy || "Rolling"} onChange={(e) => updateSelectedConfig("strategy", e.target.value)}><option>Rolling</option><option>Recreate</option><option>Canary</option></select></Field></>}
         {selected.data.type === "approval" && <><Field label="Environment"><select value={c.environment || "production"} onChange={(e) => updateSelectedConfig("environment", e.target.value)}><option>development</option><option>qa</option><option>staging</option><option>production</option></select></Field><Field label="Approval message"><textarea value={c.message || ""} onChange={(e) => updateSelectedConfig("message", e.target.value)} placeholder="Approve production deployment" rows={3} /></Field><Field label="Approval timeout"><select value={c.timeout || "24h"} onChange={(e) => updateSelectedConfig("timeout", e.target.value)}><option>1h</option><option>4h</option><option>24h</option><option>72h</option></select></Field></>}

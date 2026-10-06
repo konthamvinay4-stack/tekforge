@@ -59,7 +59,7 @@ export default function PipelineStudio() {
   const [runtime, setRuntime] = useState("nodejs-22");
   const [environment, setEnvironment] = useState("production");
   const [compileResult, setCompileResult] = useState<string>("");
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving] = useState(false);\n  const [clusterId, setClusterId] = useState("");\n  const [namespace, setNamespace] = useState("tekforge");\n  const [message, setMessage] = useState("");
 
   const selected = useMemo(() => nodes.find((node) => node.id === selectedId), [nodes, selectedId]);
 
@@ -80,7 +80,7 @@ export default function PipelineStudio() {
     setSelectedId("");
   }
 
-  async function compile() {
+  async function deployCompiled() {\n    if (!clusterId) { setMessage("Enter a connected cluster ID."); return; }\n    setSaving(true); setMessage("");\n    try {\n      const graph = { version: 2, runtime, environment, nodes: nodes.map((node) => ({ id: node.id, type: node.data.type, label: node.data.label, detail: node.data.detail })), edges: edges.map((edge) => ({ from: edge.source, to: edge.target })) };\n      const response = await fetch("/api/pipelines/compile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(graph) });\n      const compiled = await response.json(); if (!response.ok) throw new Error(compiled.error || "Compilation failed");\n      setMessage("Graph validated and compiled. Save this graph to a pipeline before deployment.");\n    } catch (e) { setMessage(e instanceof Error ? e.message : "Deployment preparation failed"); } finally { setSaving(false); }\n  }\n\n  async function compile() {
     setSaving(true);
     setCompileResult("");
     const graph = {
@@ -122,7 +122,7 @@ export default function PipelineStudio() {
         <aside style={{ background: "white", borderLeft: "1px solid #eaecf0", padding: 20, overflow: "auto" }}>
           <div style={eyebrow}>PIPELINE</div>
           <label style={field}>Runtime<select value={runtime} onChange={(e) => setRuntime(e.target.value)} style={input}><option value="nodejs-22">Node.js 22</option><option value="java-21">Java 21</option><option value="python-3.12">Python 3.12</option><option value="go-1.24">Go 1.24</option></select></label>
-          <label style={field}>Environment<select value={environment} onChange={(e) => setEnvironment(e.target.value)} style={input}><option>development</option><option>qa</option><option>staging</option><option>production</option></select></label>
+          <label style={field}>Environment<select value={environment} onChange={(e) => setEnvironment(e.target.value)} style={input}><option>development</option><option>qa</option><option>staging</option><option>production</option></select></label><label style={field}>Connected cluster<input value={clusterId} onChange={(e) => setClusterId(e.target.value)} placeholder="Cluster ID" style={input} /></label><label style={field}>Namespace<input value={namespace} onChange={(e) => setNamespace(e.target.value)} style={input} /></label><button style={{ ...primary, width: "100%", marginTop: 16 }} onClick={deployCompiled}>Validate for cluster</button>{message && <div style={{ marginTop: 10, fontSize: 12, color: "#475467" }}>{message}</div>}
           {selected && <div style={{ marginTop: 24 }}><div style={eyebrow}>SELECTED STAGE</div><h3 style={{ marginBottom: 4 }}>{selected.data.label}</h3><p style={muted}>{selected.data.detail}</p><label style={field}>Failure policy<select style={input}><option>Fail pipeline</option><option>Continue</option><option>Manual gate</option></select></label><button style={{ ...danger, marginTop: 14 }} onClick={removeSelected}>Remove stage</button></div>}
           {compileResult && <div style={{ marginTop: 22 }}><div style={eyebrow}>COMPILED TEKTON</div><pre style={code}>{compileResult}</pre></div>}
         </aside>

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
+function tektonName(value: string) {\n  return value.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "tekforge-pipeline";\n}
+
 export async function GET(request: Request) {
   const projectId = new URL(request.url).searchParams.get("projectId");
   const supabase = await createClient();
@@ -38,13 +40,14 @@ export async function POST(request: Request) {
   if (applicationError || !application) return NextResponse.json({ error: applicationError?.message || "Application creation failed" }, { status: 500 });
 
   const pipelineName = `${application.name}-ci`;
+  const tektonPipelineName = tektonName(pipelineName);
   const { data: pipeline, error: pipelineError } = await supabase
     .from("pipelines")
     .insert({
       application_id: application.id,
       name: pipelineName,
       template: "node-ci",
-      tekton_pipeline_name: "node-ci",
+      tekton_pipeline_name: tektonPipelineName,
       spec: {
         runtime: application.runtime,
         runtimeVersion: application.runtime_version,

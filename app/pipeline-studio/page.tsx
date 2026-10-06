@@ -372,7 +372,7 @@ export default function PipelineStudio() {
     setMessage(`${def.label} added. Configure it in the inspector.`);
   }
 
-  function updateSelectedConfig(key: keyof StageConfig, value: string | string[]) {
+  function updateSelectedConfig(key: keyof StageConfig, value: string | string[] | boolean | number) {
     if (!selected) return;
     setNodes((current) => current.map((node) => node.id === selected.id ? { ...node, data: { ...node.data, config: { ...node.data.config, [key]: value } } } : node));
   }

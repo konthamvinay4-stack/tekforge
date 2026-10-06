@@ -10,7 +10,7 @@ const apiPort = process.env.KUBERNETES_SERVICE_PORT_HTTPS || "443";
 const apiBase = `https://${apiHost}:${apiPort}`;
 const controlPlane = (process.env.TEKFORGE_CONTROL_PLANE_URL || "").replace(/\/$/, "");
 const clusterId = process.env.TEKFORGE_CLUSTER_ID;
-const agentToken = process.env.TEKFORGE_AGENT_TOKEN;
+let agentToken = process.env.TEKFORGE_AGENT_TOKEN;
 const executionNamespace = process.env.TEKFORGE_EXECUTION_NAMESPACE || "tekforge";
 const intervalMs = Math.max(Number(process.env.TEKFORGE_HEARTBEAT_INTERVAL_MS || 15000), 5000);
 const pollMs = Math.max(Number(process.env.TEKFORGE_COMMAND_POLL_MS || 5000), 3000);
@@ -143,6 +143,24 @@ async function executeCommand(command) {
   throw new Error(`Unsupported agent command: ${command.type}`);
 }
 
+async function refreshToken() {
+  try {
+    const response = await fetch(`${controlPlane}/api/agent/token/refresh`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${agentToken}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) throw new Error(`Token refresh ${response.status}`);
+    const body = await response.json();
+    if (body.token) {
+      agentToken = body.token;
+      console.log(JSON.stringify({ level: "info", message: "agent token refreshed", clusterId }));
+    }
+  } catch (error) {
+    console.error(JSON.stringify({ level: "warn", message: error instanceof Error ? error.message : String(error) }));
+  }
+}
+
 async function heartbeat() {
   try { const cluster = await snapshot(); await post("/api/agent/heartbeat", { clusterId, cluster }); console.log(JSON.stringify({ level: "info", message: "heartbeat sent", clusterId, ...cluster })); }
   catch (error) { console.error(JSON.stringify({ level: "error", message: error instanceof Error ? error.message : String(error) })); }
@@ -166,5 +184,6 @@ async function pollCommands() {
 
 await heartbeat();
 setInterval(heartbeat, intervalMs);
+setInterval(refreshToken, 12 * 60 * 60 * 1000);
 setInterval(pollCommands, pollMs);
 await pollCommands();

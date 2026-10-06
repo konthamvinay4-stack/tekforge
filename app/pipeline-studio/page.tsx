@@ -97,7 +97,7 @@ function createNode(def: StageDefinition, index: number): StageNode {
   };
 }
 
-const initialNodes: StageNode[] = definitions.slice(0, 6).map(createNode);
+const initialNodes: StageNode[] = definitions.slice(1, 7).map(createNode);
 const initialEdges: Edge[] = initialNodes.slice(0, -1).map((node, index) => ({
   id: `${node.id}-${initialNodes[index + 1].id}`,
   source: node.id,

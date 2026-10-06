@@ -14,9 +14,65 @@ function safeName(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "stage";
 }
 
-function taskFor(node: PipelineGraph["nodes"][number]) {
+function scriptFor(node: PipelineGraph["nodes"][number]) {
   const config = node.config || {};
-  const name = safeName(node.id);
+  const timeout = String(config.timeout || "10m");
+  const manifestPath = String(config.manifestPath || "k8s/");
+  const target = String(config.target || "Kubernetes");
+
+  switch (node.type) {
+    case "trigger": return ["echo Pipeline triggered"];
+    case "source": return [
+      "rm -rf /workspace/source/*",
+      "git clone " + String(config.repository || "$(params.repository)") + " /workspace/source",
+    ];
+    case "build": return [
+      "cd /workspace/source",
+      "if [ -f package-lock.json ]; then npm ci; elif [ -f pnpm-lock.yaml ]; then corepack enable && pnpm install --frozen-lockfile; elif [ -f yarn.lock ]; then corepack enable && yarn install --immutable; fi",
+      String(config.command || "if [ -f package.json ]; then npm run build --if-present; fi"),
+    ];
+    case "test": return [
+      "cd /workspace/source",
+      String(config.testCommand || "if [ -f package.json ]; then npm test --if-present; fi"),
+    ];
+    case "security":
+      return [String(config.failOn === "Never"
+        ? "trivy fs --exit-code 0 --no-progress /workspace/source"
+        : "trivy fs --exit-code 1 --severity HIGH,CRITICAL --no-progress /workspace/source")];
+    case "image":
+      return ["/kaniko/executor --context=/workspace/source --destination=" + String(config.image || "$(params.image)") + ":" + String(config.tag || "latest") + " --cache=true"];
+    case "deploy":
+      return [
+        "if [ -d /workspace/source/" + manifestPath.replace(/^\/+/, "") + " ]; then kubectl apply -f /workspace/source/" + manifestPath.replace(/^\/+/, ") + " -R; else echo 'Deployment manifest path not found: " + manifestPath.replace(/'/g, "'\\''") + "'; exit 1; fi",
+      ];
+    case "helm":
+      return [
+        "helm upgrade --install " + String(config.release || "tekforge-app") + " " + String(config.chart || "./helm") +
+          " --namespace " + String(config.namespace || "default") + " --create-namespace",
+      ];
+    case "gitops":
+      return ["echo GitOps sync requested for " + String(config.application || "application")];
+    case "verify":
+      if (config.check === "HTTP smoke test" && config.endpoint) {
+        return ["curl --fail --silent --show-error --max-time 30 " + String(config.endpoint)];
+      }
+      if (config.check === "Custom command" && config.command) {
+        return [String(config.command)];
+      }
+      return ["kubectl rollout status -f /workspace/source/" + manifestPath.replace(/^\/+/, "") + " -R --timeout=" + timeout];
+    case "approval":
+      return ["echo Approval gate passed"];
+    case "notify":
+      return ["echo Notification requested for " + String(config.event || "completion")];
+    case "rollback":
+      if (target === "Helm") {
+        return ["helm rollback " + String(config.release || "tekforge-app") + " 0 --namespace " + String(config.namespace || "default")];
+      }
+      return ["kubectl rollout undo -f /workspace/source/" + manifestPath.replace(/^\/+/, "") + " -R"];
+  }
+}
+
+function taskFor(node: PipelineGraph["nodes"][number]) {
   const imageByType: Record<PipelineStageType, string> = {
     trigger: "alpine:3.22",
     source: "alpine/git:2.47.2",
@@ -32,23 +88,28 @@ function taskFor(node: PipelineGraph["nodes"][number]) {
     notify: "curlimages/curl:8.15.0",
     rollback: "bitnami/kubectl:1.33",
   };
-  const commandByType: Record<PipelineStageType, string[]> = {
-    trigger: ["echo Pipeline triggered"],
-    source: ["rm -rf /workspace/source/*", "git clone " + String(config.repository || "$(params.repository)") + " /workspace/source"],
-    build: ["cd /workspace/source", "if [ -f package-lock.json ]; then npm ci; elif [ -f pnpm-lock.yaml ]; then corepack enable && pnpm install --frozen-lockfile; elif [ -f yarn.lock ]; then corepack enable && yarn install --immutable; fi", String(config.command || "if [ -f package.json ]; then npm run build --if-present; fi")],
-    test: ["cd /workspace/source", String(config.testCommand || "if [ -f package.json ]; then npm test --if-present; fi")],
-    security: [String(config.failOn === "Never" ? "trivy fs --exit-code 0 --no-progress /workspace/source" : "trivy fs --exit-code 1 --severity HIGH,CRITICAL --no-progress /workspace/source")],
-    image: ["/kaniko/executor --context=/workspace/source --destination=" + String(config.image || "$(params.image)") + ":" + String(config.tag || "latest") + " --cache=true"],
-    deploy: ["if [ -d /workspace/source/k8s ]; then kubectl apply -f /workspace/source/k8s; elif [ -d /workspace/source/kubernetes ]; then kubectl apply -f /workspace/source/kubernetes; else echo 'No Kubernetes manifests found'; exit 1; fi"],
-    helm: ["helm upgrade --install " + String(config.release || "tekforge-app") + " " + String(config.chart || "./helm") + " --namespace " + String(config.namespace || "default") + " --create-namespace"],
-    gitops: ["echo GitOps sync requested for " + String(config.application || "application")],
-    verify: ["kubectl rollout status deployment --timeout=" + String(config.timeout || "10m")],
-    approval: ["echo Approval gate passed"],
-    notify: ["echo Notification requested"],
-    rollback: ["echo Rollback requested"],
-  };
-
-  return `apiVersion: tekton.dev/v1\nkind: Task\nmetadata:\n  name: ${name}\nspec:\n  params:\n    - name: repository\n      type: string\n    - name: image\n      type: string\n  workspaces:\n    - name: source\n  steps:\n    - name: ${name}\n      image: ${imageByType[node.type]}\n      workingDir: /workspace/source\n      script: |\n${commandByType[node.type].map((line) => `        ${line}`).join("\n")}\n`;
+  const lines = scriptFor(node);
+  return `apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: ${safeName(node.id)}
+spec:
+  params:
+    - name: repository
+      type: string
+    - name: image
+      type: string
+  workspaces:
+    - name: source
+  steps:
+    - name: ${safeName(node.id)}
+      image: ${imageByType[node.type]}
+      workingDir: /workspace/source
+      script: |
+        #!/bin/sh
+        set -eu
+${lines.map((line) => `        ${line}`).join("\n")}
+`;
 }
 
 export function validateGraph(graph: PipelineGraph) {
@@ -73,15 +134,20 @@ export function validateGraph(graph: PipelineGraph) {
 export function compileToTekton(graph: PipelineGraph, pipelineName = "tekforge-generated") {
   validateGraph(graph);
   const taskYaml = graph.nodes.map(taskFor).join("---\n");
-  const pipelineTasks = graph.nodes.map((node) => {
-    const deps = graph.edges.filter((edge) => edge.to === node.id).map((edge) => safeName(edge.from));
+  const executableNodes = graph.nodes.filter((node) => node.type !== "rollback");
+  const rollbackNodes = graph.nodes.filter((node) => node.type === "rollback");
+  const pipelineTasks = executableNodes.map((node) => {
+    const deps = graph.edges.filter((edge) => edge.to === node.id && edge.from !== node.id && graph.nodes.some((candidate) => candidate.id === edge.from && candidate.type !== "rollback")).map((edge) => safeName(edge.from));
     const runAfter = deps.length ? `\n      runAfter:\n${deps.map((dep) => `        - ${dep}`).join("\n")}` : "";
     return `    - name: ${safeName(node.id)}\n      taskRef:\n        name: ${safeName(node.id)}\n      params:\n        - name: repository\n          value: $(params.repository)\n        - name: image\n          value: $(params.image)\n      workspaces:\n        - name: source\n          workspace: shared-source${runAfter}`;
   }).join("\n");
+  const finallyYaml = rollbackNodes.length ? `\n  finally:\n${rollbackNodes.map((node) => {
+    const predecessor = graph.edges.find((edge) => edge.to === node.id && graph.nodes.find((candidate) => candidate.id === edge.from)?.type === "verify");
+    const when = predecessor ? `\n      when:\n        - input: "$(tasks.${safeName(predecessor.from)}.status)"\n          operator: in\n          values: ["Failed"]` : "";
+    return `    - name: ${safeName(node.id)}\n      taskRef:\n        name: ${safeName(node.id)}\n      params:\n        - name: repository\n          value: $(params.repository)\n        - name: image\n          value: $(params.image)\n      workspaces:\n        - name: source\n          workspace: shared-source${when}`;
+  }).join("\n")}` : "";
 
-  const pipelineYaml = `apiVersion: tekton.dev/v1\nkind: Pipeline\nmetadata:\n  name: tekforge-generated\n  labels:\n    tekforge.dev/runtime: ${safeName(graph.runtime)}\n    tekforge.dev/environment: ${safeName(graph.environment)}\nspec:\n  params:\n    - name: repository\n      type: string\n    - name: image\n      type: string\n  workspaces:\n    - name: shared-source\n  tasks:\n${pipelineTasks}\n`;
-
-  const resourceImageByType: Record<PipelineStageType, string> = { trigger: "alpine:3.22", source: "alpine/git:2.47.2", build: "node:22-bookworm-slim", test: "node:22-bookworm-slim", security: "aquasec/trivy:0.66.0", image: "gcr.io/kaniko-project/executor:v1.24.0", deploy: "bitnami/kubectl:1.33", helm: "alpine/helm:3.18.4", gitops: "alpine:3.22", verify: "bitnami/kubectl:1.33", approval: "alpine:3.22", notify: "curlimages/curl:8.15.0", rollback: "bitnami/kubectl:1.33" };
+  const pipelineYaml = `apiVersion: tekton.dev/v1\nkind: Pipeline\nmetadata:\n  name: tekforge-generated\n  labels:\n    tekforge.dev/runtime: ${safeName(graph.runtime)}\n    tekforge.dev/environment: ${safeName(graph.environment)}\nspec:\n  params:\n    - name: repository\n      type: string\n    - name: image\n      type: string\n  workspaces:\n    - name: shared-source\n  tasks:\n${pipelineTasks}${finallyYaml}\n`;
 
   const pipelineResource = {
     apiVersion: "tekton.dev/v1",
@@ -90,12 +156,26 @@ export function compileToTekton(graph: PipelineGraph, pipelineName = "tekforge-g
     spec: {
       params: [{ name: "repository", type: "string" }, { name: "image", type: "string" }],
       workspaces: [{ name: "shared-source" }],
-      tasks: graph.nodes.map((node) => ({
+      tasks: executableNodes.map((node) => ({
         name: safeName(node.id), taskRef: { name: safeName(node.id) },
         params: [{ name: "repository", value: "$(params.repository)" }, { name: "image", value: "$(params.image)" }],
         workspaces: [{ name: "source", workspace: "shared-source" }],
-        ...(graph.edges.filter((edge) => edge.to === node.id).length ? { runAfter: graph.edges.filter((edge) => edge.to === node.id).map((edge) => safeName(edge.from)) } : {}),
+        ...(graph.edges.filter((edge) => edge.to === node.id && graph.nodes.some((candidate) => candidate.id === edge.from && candidate.type !== "rollback")).length
+          ? { runAfter: graph.edges.filter((edge) => edge.to === node.id && graph.nodes.some((candidate) => candidate.id === edge.from && candidate.type !== "rollback")).map((edge) => safeName(edge.from)) }
+          : {}),
       })),
+      ...(rollbackNodes.length ? {
+        finally: rollbackNodes.map((node) => {
+          const predecessor = graph.edges.find((edge) => edge.to === node.id && graph.nodes.find((candidate) => candidate.id === edge.from)?.type === "verify");
+          return {
+            name: safeName(node.id),
+            taskRef: { name: safeName(node.id) },
+            params: [{ name: "repository", value: "$(params.repository)" }, { name: "image", value: "$(params.image)" }],
+            workspaces: [{ name: "source", workspace: "shared-source" }],
+            ...(predecessor ? { when: [{ input: "$(tasks." + safeName(predecessor.from) + ".status)", operator: "in", values: ["Failed"] }] } : {}),
+          };
+        }),
+      } : {}),
     },
   };
   const taskResources = graph.nodes.map((node) => ({
@@ -103,7 +183,12 @@ export function compileToTekton(graph: PipelineGraph, pipelineName = "tekforge-g
     spec: {
       params: [{ name: "repository", type: "string" }, { name: "image", type: "string" }],
       workspaces: [{ name: "source" }],
-      steps: [{ name: safeName(node.id), image: resourceImageByType[node.type], workingDir: "/workspace/source", script: "#!/bin/sh\nset -eu\n" + ({ trigger: ["echo Pipeline triggered"], source: ["rm -rf /workspace/source/*", "git clone $(params.repository) /workspace/source"], build: ["cd /workspace/source", "if [ -f package-lock.json ]; then npm ci; elif [ -f pnpm-lock.yaml ]; then corepack enable && pnpm install --frozen-lockfile; elif [ -f yarn.lock ]; then corepack enable && yarn install --immutable; fi", "if [ -f package.json ]; then npm run build --if-present; fi"], test: ["cd /workspace/source", "if [ -f package.json ]; then npm test --if-present; fi"], security: ["trivy fs --exit-code 1 --no-progress /workspace/source"], image: ["/kaniko/executor --context=/workspace/source --destination=$(params.image) --cache=true"], deploy: ["if [ -d /workspace/source/k8s ]; then kubectl apply -f /workspace/source/k8s; elif [ -d /workspace/source/kubernetes ]; then kubectl apply -f /workspace/source/kubernetes; else echo 'No Kubernetes manifests found'; exit 1; fi"], helm: ["helm upgrade --install $(params.image) ./helm --namespace default --create-namespace"], gitops: ["echo GitOps sync requested"], verify: ["echo Deployment verification requested"], approval: ["echo 'Approval gate passed'"], notify: ["echo Notification requested"], rollback: ["echo Rollback requested"] } as Record<PipelineStageType, string[]>)[node.type].join("\n") }],
+      steps: [{ name: safeName(node.id), image: ({
+        trigger: "alpine:3.22", source: "alpine/git:2.47.2", build: "node:22-bookworm-slim", test: "node:22-bookworm-slim",
+        security: "aquasec/trivy:0.66.0", image: "gcr.io/kaniko-project/executor:v1.24.0", deploy: "bitnami/kubectl:1.33",
+        helm: "alpine/helm:3.18.4", gitops: "alpine:3.22", verify: "bitnami/kubectl:1.33", approval: "alpine:3.22",
+        notify: "curlimages/curl:8.15.0", rollback: "bitnami/kubectl:1.33",
+      } as Record<PipelineStageType, string[]>)[node.type] as unknown as string, workingDir: "/workspace/source", script: "#!/bin/sh\nset -eu\n" + scriptFor(node).join("\n") }],
     },
   }));
 

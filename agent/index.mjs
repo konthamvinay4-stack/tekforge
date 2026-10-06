@@ -173,7 +173,7 @@ async function executeCommand(command) {
       apiVersion: "tekton.dev/v1",
       kind: "PipelineRun",
       metadata: { name: runName, namespace: targetNamespace, labels: { "tekforge.dev/managed": "true" } },
-      spec: { pipelineRef: { name: pipelineName }, params, workspaces: [{ name: "source", emptyDir: {} }] },
+      spec: { pipelineRef: { name: pipelineName }, params, workspaces: [{ name: "shared-source", emptyDir: {} }] },
     };
     const resource = await kube(`/apis/tekton.dev/v1/namespaces/${encodeURIComponent(targetNamespace)}/pipelineruns`, { method: "POST", body: run });
     return { operation: command.type, namespace: targetNamespace, resource };

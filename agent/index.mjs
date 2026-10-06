@@ -11,6 +11,7 @@ const apiBase = `https://${apiHost}:${apiPort}`;
 const controlPlane = (process.env.TEKFORGE_CONTROL_PLANE_URL || "").replace(/\/$/, "");
 const clusterId = process.env.TEKFORGE_CLUSTER_ID;
 const agentToken = process.env.TEKFORGE_AGENT_TOKEN;
+const executionNamespace = process.env.TEKFORGE_EXECUTION_NAMESPACE || "tekforge";
 const intervalMs = Math.max(Number(process.env.TEKFORGE_HEARTBEAT_INTERVAL_MS || 15000), 5000);
 const pollMs = Math.max(Number(process.env.TEKFORGE_COMMAND_POLL_MS || 5000), 3000);
 
@@ -18,19 +19,25 @@ if (!controlPlane || !clusterId || !agentToken) {
   throw new Error("TEKFORGE_CONTROL_PLANE_URL, TEKFORGE_CLUSTER_ID and TEKFORGE_AGENT_TOKEN are required");
 }
 
-function kube(path) {
+function kube(path, options = {}) {
   return new Promise((resolve, reject) => {
-    const request = https.request(`${apiBase}${path}`, { ca, headers: { Authorization: `Bearer ${token}` } }, (response) => {
+    const data = options.body ? JSON.stringify(options.body) : null;
+    const request = https.request(`${apiBase}${path}`, {
+      method: options.method || "GET",
+      ca,
+      headers: { Authorization: `Bearer ${token}`, ...(data ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) } : {}) },
+    }, (response) => {
       let body = "";
       response.on("data", (chunk) => { body += chunk; });
       response.on("end", () => {
         if (response.statusCode >= 200 && response.statusCode < 300) {
-          try { resolve(JSON.parse(body)); } catch { resolve(body); }
+          try { resolve(body ? JSON.parse(body) : null); } catch { resolve(body); }
         } else reject(new Error(`Kubernetes API ${response.statusCode}: ${body}`));
       });
     });
     request.on("error", reject);
-    request.setTimeout(10000, () => request.destroy(new Error("Kubernetes API timeout")));
+    request.setTimeout(15000, () => request.destroy(new Error("Kubernetes API timeout")));
+    if (data) request.write(data);
     request.end();
   });
 }
@@ -51,9 +58,7 @@ function post(path, payload) {
   });
 }
 
-async function optional(path) {
-  try { return await kube(path); } catch { return null; }
-}
+async function optional(path) { try { return await kube(path); } catch { return null; } }
 
 async function snapshot() {
   const [version, nodes, namespaces, pods, services, deployments, events, tektonPipelines, pipelineRuns, taskRuns] = await Promise.all([
@@ -62,25 +67,49 @@ async function snapshot() {
     optional("/apis/tekton.dev/v1/pipelines"), optional("/apis/tekton.dev/v1/pipelineruns"), optional("/apis/tekton.dev/v1/taskruns"),
   ]);
   const readyDeployments = (deployments?.items || []).filter((item) => item.status?.readyReplicas === item.status?.replicas && (item.status?.replicas || 0) > 0).length;
-  const recentEvents = (events?.items || []).slice(-25).map((event) => ({ type: event.type, reason: event.reason, message: event.message, namespace: event.metadata?.namespace, involvedKind: event.involvedObject?.kind, involvedName: event.involvedObject?.name, lastTimestamp: event.lastTimestamp || event.eventTime }));
   return {
-    kubernetesVersion: version.gitVersion || version.gitVersionShort || "unknown", nodes: nodes.items?.length || 0,
-    namespaces: namespaces.items?.length || 0, pods: pods.items?.length || 0, services: services?.items?.length || 0,
-    deployments: deployments?.items?.length || 0, healthyDeployments: readyDeployments, tekton: Boolean(tektonPipelines),
-    pipelineCount: tektonPipelines?.items?.length || 0, pipelineRunCount: pipelineRuns?.items?.length || 0,
-    taskRunCount: taskRuns?.items?.length || 0, recentEvents, agentNamespace: namespace, observedAt: new Date().toISOString(),
+    kubernetesVersion: version.gitVersion || "unknown", nodes: nodes.items?.length || 0, namespaces: namespaces.items?.length || 0,
+    pods: pods.items?.length || 0, services: services?.items?.length || 0, deployments: deployments?.items?.length || 0,
+    healthyDeployments: readyDeployments, tekton: Boolean(tektonPipelines), pipelineCount: tektonPipelines?.items?.length || 0,
+    pipelineRunCount: pipelineRuns?.items?.length || 0, taskRunCount: taskRuns?.items?.length || 0,
+    recentEvents: (events?.items || []).slice(-25).map((event) => ({ type: event.type, reason: event.reason, message: event.message, namespace: event.metadata?.namespace, involvedKind: event.involvedObject?.kind, involvedName: event.involvedObject?.name, lastTimestamp: event.lastTimestamp || event.eventTime })),
+    agentNamespace: namespace, executionNamespace, observedAt: new Date().toISOString(),
   };
 }
 
-async function executeReadCommand(command) {
+function validName(value) { return /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(value); }
+
+async function executeCommand(command) {
   const payload = command.payload || {};
-  if (command.type !== "get-pipelinerun") throw new Error(`Unsupported agent command: ${command.type}`);
-  const targetNamespace = String(payload.namespace || namespace);
-  if (!/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(targetNamespace)) throw new Error("Invalid namespace");
-  const name = String(payload.name || "").trim();
-  if (!/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(name)) throw new Error("Invalid PipelineRun name");
-  const resource = await kube(`/apis/tekton.dev/v1/namespaces/${encodeURIComponent(targetNamespace)}/pipelineruns/${encodeURIComponent(name)}`);
-  return { operation: command.type, namespace: targetNamespace, resource };
+  const targetNamespace = String(payload.namespace || executionNamespace);
+  if (targetNamespace !== executionNamespace) throw new Error(`Execution is restricted to namespace ${executionNamespace}`);
+  if (!validName(targetNamespace)) throw new Error("Invalid namespace");
+
+  if (command.type === "get-pipelinerun") {
+    const name = String(payload.name || "").trim();
+    if (!validName(name)) throw new Error("Invalid PipelineRun name");
+    const resource = await kube(`/apis/tekton.dev/v1/namespaces/${encodeURIComponent(targetNamespace)}/pipelineruns/${encodeURIComponent(name)}`);
+    return { operation: command.type, namespace: targetNamespace, resource };
+  }
+
+  if (command.type === "create-pipelinerun") {
+    const pipelineName = String(payload.pipelineName || "").trim();
+    if (!validName(pipelineName)) throw new Error("Invalid Tekton Pipeline name");
+    const runName = String(payload.runName || `tekforge-${Date.now()}`).trim();
+    if (!validName(runName)) throw new Error("Invalid PipelineRun name");
+
+    const params = Array.isArray(payload.params) ? payload.params : [];
+    const run = {
+      apiVersion: "tekton.dev/v1",
+      kind: "PipelineRun",
+      metadata: { name: runName, namespace: targetNamespace, labels: { "tekforge.dev/managed": "true" } },
+      spec: { pipelineRef: { name: pipelineName }, params, workspaces: [{ name: "source", emptyDir: {} }] },
+    };
+    const resource = await kube(`/apis/tekton.dev/v1/namespaces/${encodeURIComponent(targetNamespace)}/pipelineruns`, { method: "POST", body: run });
+    return { operation: command.type, namespace: targetNamespace, resource };
+  }
+
+  throw new Error(`Unsupported agent command: ${command.type}`);
 }
 
 async function heartbeat() {
@@ -95,7 +124,7 @@ async function pollCommands() {
     const body = await response.json();
     for (const command of body.commands || []) {
       try {
-        const result = await executeReadCommand(command);
+        const result = await executeCommand(command);
         await post("/api/agent/commands/result", { commandId: command.id, status: "completed", result });
       } catch (error) {
         await post("/api/agent/commands/result", { commandId: command.id, status: "failed", error: error instanceof Error ? error.message : String(error) });

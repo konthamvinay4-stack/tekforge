@@ -49,7 +49,14 @@ export default function Home() {
     setApplications(data.applications || []);
   }
 
-  async function loadAgents() {\n    const response = await fetch("/api/agent/clusters", { cache: "no-store" });\n    const data = await response.json();\n    if (!response.ok) throw new Error(data.error || "Unable to load agents");\n    setAgents(data.clusters || []);\n  }\n\n  async function loadPipelines() {
+  async function loadAgents() {
+    const response = await fetch("/api/agent/clusters", { cache: "no-store" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Unable to load agents");
+    setAgents(data.clusters || []);
+  }
+
+  async function loadPipelines() {
     const response = await fetch("/api/pipelines", { cache: "no-store" });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Unable to load pipelines");
@@ -59,7 +66,8 @@ export default function Home() {
   useEffect(() => {
     loadProjects().catch((error) => setMessage(error instanceof Error ? error.message : "Unable to load projects"));
     loadApplications().catch(() => undefined);
-    loadPipelines().catch(() => undefined);\n    loadAgents().catch(() => undefined);
+    loadPipelines().catch(() => undefined);
+    loadAgents().catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -149,7 +157,9 @@ export default function Home() {
 
         {active === "Pipelines" && <section className="section"><div className="card"><div className="section-head"><div><h2>Pipelines</h2><div className="metric-label">Live pipeline definitions generated for applications.</div></div><div style={{ display: "flex", gap: 10 }}><button className="secondary" onClick={() => loadPipelines().catch((error) => setMessage(error instanceof Error ? error.message : "Unable to refresh pipelines"))}>Refresh</button><button className="primary" onClick={() => { window.location.href = "/pipeline-studio"; }}>Design pipeline</button></div></div>{message && <div className="helper" style={{ marginBottom: 16 }}>{message}</div>}{pipelines.length === 0 ? <div className="empty-state"><h2>No pipelines yet</h2><p className="subtitle">Create an application to automatically generate its pipeline.</p><button className="primary" onClick={() => setActive("Applications")}>Create application</button></div> : <div className="project-list">{pipelines.map((pipeline) => <div className="run" key={pipeline.id}><div className="project-icon">⑂</div><div className="run-main"><div className="run-title">{pipeline.name}</div><div className="run-meta">{pipeline.applications?.name || "Application"} · template: {pipeline.template} · Tekton: {pipeline.tekton_pipeline_name || "not linked"}</div></div><span className="badge success">READY</span></div>)}</div>}</div></section>}
 
-        {active === "Agents" && <div className="card"><div className="section-head"><div><h2>Kubernetes Agents</h2><div className="metric-label">Connect your cluster to unlock agent-backed deployments.</div></div><button className="primary" onClick={() => { window.location.href = "/agents"; }}>Install Agent</button></div>{agents.length === 0 ? <div className="empty-state"><h2>No agents connected</h2><p className="subtitle">Install the TekForge agent into GKE, EKS, AKS or an on-prem Kubernetes cluster.</p></div> : <div className="project-list">{agents.map((agent) => <div className="run" key={agent.id}><StatusDot status={agent.status} /><div className="run-main"><div className="run-title">{agent.name}</div><div className="run-meta">{agent.provider} · Kubernetes {agent.kubernetes_version || "unknown"} · {agent.nodes} nodes · {agent.pods} pods</div></div><span className={`badge ${agent.status === "connected" ? "success" : "failed"}`}>{agent.status}</span></div>)}</div>}</div>}\n\n        {active !== "Dashboard" && active !== "Applications" && active !== "Projects" && active !== "Pipelines" && active !== "Agents" && <div className="card empty-state"><div className="empty-icon">{active.slice(0, 1)}</div><h2>{active}</h2><p className="subtitle">This workspace is ready for the live Supabase and Tekton integration.</p><button className="primary" onClick={() => setActive("Applications")}>Connect an application</button></div>}
+        {active === "Agents" && <div className="card"><div className="section-head"><div><h2>Kubernetes Agents</h2><div className="metric-label">Connect your cluster to unlock agent-backed deployments.</div></div><button className="primary" onClick={() => { window.location.href = "/agents"; }}>Install Agent</button></div>{agents.length === 0 ? <div className="empty-state"><h2>No agents connected</h2><p className="subtitle">Install the TekForge agent into GKE, EKS, AKS or an on-prem Kubernetes cluster.</p></div> : <div className="project-list">{agents.map((agent) => <div className="run" key={agent.id}><StatusDot status={agent.status} /><div className="run-main"><div className="run-title">{agent.name}</div><div className="run-meta">{agent.provider} · Kubernetes {agent.kubernetes_version || "unknown"} · {agent.nodes} nodes · {agent.pods} pods</div></div><span className={`badge ${agent.status === "connected" ? "success" : "failed"}`}>{agent.status}</span></div>)}</div>}</div>}
+
+        {active !== "Dashboard" && active !== "Applications" && active !== "Projects" && active !== "Pipelines" && active !== "Agents" && <div className="card empty-state"><div className="empty-icon">{active.slice(0, 1)}</div><h2>{active}</h2><p className="subtitle">This workspace is ready for the live Supabase and Tekton integration.</p><button className="primary" onClick={() => setActive("Applications")}>Connect an application</button></div>}
       </main>
     </div>
   );

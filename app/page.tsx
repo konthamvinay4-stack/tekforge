@@ -8,6 +8,7 @@ const nav = [
   { label: "Applications", icon: "box" },
   { label: "Pipelines", icon: "git" },
   { label: "Pipeline Studio", icon: "wand" },
+  { label: "Releases", icon: "release" },
   { label: "Deployments", icon: "rocket" },
   { label: "Agents", icon: "server" },
 ];
@@ -30,6 +31,7 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
     git: <><circle cx="7" cy="7" r="3" /><circle cx="17" cy="17" r="3" /><path d="M9.5 8.5 14.5 13.5M7 10v7a4 4 0 0 0 4 4h3" /></>,
     wand: <><path d="m15 4 5 5M13 6l5 5M4 20l10-10" /><path d="m5 5 1 2 2 1-2 1-1 2-1-2-2-1 2-1z" /></>,
     rocket: <><path d="M14 4c3-2 6-2 7-1 1 1 1 4-1 7l-7 7-5-5z" /><path d="m8 16-4 1 1-4M6 21l-2-2M9 12l-2-2" /><circle cx="16.5" cy="7.5" r="1.3" /></>,
+    release: <><path d="M5 5h14v14H5z" /><path d="M9 9h6M9 13h6M9 17h3" /></>,
     server: <><rect x="3" y="3" width="18" height="7" rx="2" /><rect x="3" y="14" width="18" height="7" rx="2" /><path d="M7 6.5h.01M7 17.5h.01M11 6.5h7M11 17.5h7" /></>,
     book: <><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v18H6.5A2.5 2.5 0 0 0 4 22z" /><path d="M4 4.5v15A2.5 2.5 0 0 1 6.5 17H20" /></>,
     plus: <><path d="M12 5v14M5 12h14" /></>,
@@ -59,6 +61,7 @@ export default function Home() {
   const [applications, setApplications] = useState<Application[]>([]);
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [agents, setAgents] = useState<any[]>([]);
+  const [releases, setReleases] = useState<any[]>([]);
   const [projectName, setProjectName] = useState("");
   const [projectDescription, setProjectDescription] = useState("");
   const [showProjectForm, setShowProjectForm] = useState(false);
@@ -95,10 +98,18 @@ export default function Home() {
     setPipelines(data.pipelines || []);
   }
 
+  async function loadReleases() {
+    const response = await fetch("/api/releases", { cache: "no-store" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Unable to load releases");
+    setReleases(data.releases || []);
+  }
+
   useEffect(() => {
     loadProjects().catch((e) => setMessage(e instanceof Error ? e.message : "Unable to load projects"));
     loadApplications().catch(() => undefined);
     loadPipelines().catch(() => undefined);
+    loadReleases().catch(() => undefined);
     loadAgents().catch(() => undefined);
     if (window.localStorage.getItem("tekforge-onboarding-complete") !== "true") setShowGuide(true);
   }, []);
@@ -244,6 +255,25 @@ export default function Home() {
         {active === "Pipelines" && <section className="page"><div className="page-heading"><div><div className="kicker">DELIVERY</div><h1>Pipelines</h1><p>Visual delivery definitions compiled into deployable Tekton resources.</p></div><button className="primary" onClick={openPipelineStudio}>Open Pipeline Studio <Icon name="arrow" size={15} /></button></div><div className="card">{pipelines.length === 0 ? <div className="empty-state"><h2>No pipelines yet</h2><p>Create an application or design a pipeline from scratch.</p></div> : <div className="resource-list">{pipelines.map((pipeline) => <div className="resource-row" key={pipeline.id}><div className="resource-icon"><Icon name="git" size={18} /></div><div className="resource-main"><strong>{pipeline.name}</strong><small>{pipeline.tekton_pipeline_name || "Not linked"} · {pipeline.template}</small></div><span className="status-label success-text">READY</span></div>)}</div>}</div></section>}
 
         {active === "Agents" && <section className="page"><div className="page-heading"><div><div className="kicker">DATA PLANE</div><h1>Kubernetes Agents</h1><p>Connect GKE, EKS, AKS or on-prem clusters using an outbound-only agent.</p></div><button className="primary" onClick={() => window.location.href = "/agents"}>Install agent <Icon name="arrow" size={15} /></button></div><div className="card">{agents.length === 0 ? <div className="empty-state"><div className="empty-icon"><Icon name="server" size={22} /></div><h2>No agents connected</h2><p>Install the TekForge agent into your Kubernetes cluster to enable execution.</p><button className="primary" onClick={() => window.location.href = "/agents"}>Install first agent</button></div> : <div className="resource-list">{agents.map((agent) => <div className="resource-row" key={agent.id}><StatusDot status={agent.status} /><div className="resource-main"><strong>{agent.name}</strong><small>{agent.provider} · Kubernetes {agent.kubernetes_version || "unknown"} · {agent.nodes} nodes · {agent.pods} pods</small></div><span className={`status-label ${agent.status === "connected" ? "success-text" : ""}`}>{agent.status}</span></div>)}</div>}</div></section>}
+
+        {active === "Releases" && <section className="page">
+          <div className="page-heading"><div><div className="kicker">RELEASE ORCHESTRATION</div><h1>Releases</h1><p>Track every PipelineRun as a release candidate across environments.</p></div><button className="secondary" onClick={() => loadReleases().catch((e) => setMessage(e instanceof Error ? e.message : "Unable to refresh releases"))}>Refresh</button></div>
+          <div className="metrics-grid">
+            <div className="metric-card card"><span>Total releases</span><strong>{releases.length}</strong><small>Recent execution history</small></div>
+            <div className="metric-card card"><span>Running</span><strong>{releases.filter((r) => r.status === "running").length}</strong><small>Active PipelineRuns</small></div>
+            <div className="metric-card card"><span>Successful</span><strong>{releases.filter((r) => r.status === "success").length}</strong><small>Completed releases</small></div>
+            <div className="metric-card card"><span>Failed</span><strong>{releases.filter((r) => r.status === "failed").length}</strong><small>Releases requiring attention</small></div>
+          </div>
+          <div className="card">
+            <div className="section-head"><div><h2>Release history</h2><p>Revision, environment and execution state from the control plane.</p></div><span className="live-pill"><span /> LIVE</span></div>
+            {releases.length === 0 ? <div className="empty-state"><h2>No releases yet</h2><p>Run a saved pipeline from Pipeline Studio and its PipelineRun will appear here.</p><button className="primary" onClick={openPipelineStudio}>Open Pipeline Studio <Icon name="arrow" size={15} /></button></div> :
+              <div className="resource-list">{releases.map((release) => <div className="resource-row" key={release.id}>
+                <StatusDot status={release.status} />
+                <div className="resource-main"><strong>{release.release} · {release.application}</strong><small>{release.pipeline} · {release.environment} · {String(release.revision).slice(0, 12)}</small></div>
+                <span className={`status-label ${release.status === "success" ? "success-text" : release.status === "running" ? "" : ""}`}>{release.status}</span>
+              </div>)}</div>}
+          </div>
+        </section>}
 
         {(active === "Deployments" || active === "Pipeline Studio") && <section className="page"><div className="page-heading"><div><div className="kicker">DELIVERY</div><h1>{active}</h1><p>{active === "Deployments" ? "Observe rollout status, execution history and cluster-backed delivery." : "Design, validate and compile your delivery graph."}</p></div><button className="primary" onClick={active === "Pipeline Studio" ? openPipelineStudio : openPipelineStudio}>{active === "Deployments" ? "Open Pipeline Studio" : "Launch Studio"} <Icon name="arrow" size={15} /></button></div><div className="card empty-state"><div className="empty-icon"><Icon name={active === "Deployments" ? "rocket" : "wand"} size={22} /></div><h2>{active === "Deployments" ? "Deployment center" : "Pipeline Studio"}</h2><p>{active === "Deployments" ? "Use the Studio to deploy through a connected agent, then observe PipelineRuns and TaskRuns." : "The visual graph is the source of truth for generated Tekton resources."}</p></div></section>}
 

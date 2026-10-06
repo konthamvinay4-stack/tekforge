@@ -163,6 +163,10 @@ export default function PipelineStudio() {
   const [applications, setApplications] = useState<any[]>([]);
   const [stageSearch, setStageSearch] = useState("");
   const [showLibrary, setShowLibrary] = useState(true);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [templateLoading, setTemplateLoading] = useState(false);
+  const [generating, setGenerating] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -222,6 +226,123 @@ export default function PipelineStudio() {
     const query = stageSearch.trim().toLowerCase();
     return definitions.filter((item) => !query || [item.label, item.detail, item.category].join(" ").toLowerCase().includes(query));
   }, [stageSearch]);
+
+  async function openTemplates() {
+    setShowTemplates(true);
+    if (templates.length) return;
+    setTemplateLoading(true);
+    try {
+      const response = await fetch("/api/pipeline-templates", { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Unable to load templates");
+      setTemplates(data.templates || []);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to load templates");
+    } finally {
+      setTemplateLoading(false);
+    }
+  }
+
+  function applyGraph(graph: any, name?: string) {
+    const restored = (graph.nodes || []).map((item: any, index: number) => ({
+      id: item.id,
+      type: "stage",
+      position: { x: 100 + (index % 3) * 300, y: 80 + Math.floor(index / 3) * 190 },
+      data: {
+        label: item.label,
+        detail: item.detail || definitions.find((d) => d.type === item.type)?.detail || "",
+        type: item.type,
+        config: item.config || definitions.find((d) => d.type === item.type)?.defaults || {},
+      },
+    })) as StageNode[];
+    setNodes(restored);
+    setEdges((graph.edges || []).map((edge: any) => ({
+      id: edge.from + "-" + edge.to,
+      source: edge.from,
+      target: edge.to,
+    })));
+    setSelectedId(restored[0]?.id || "");
+    setRuntime(graph.runtime || "nodejs-22");
+    setEnvironment(graph.environment || "production");
+    if (name) setPipelineName(name);
+    setMessage("Pipeline graph loaded. Review the configuration before saving or deploying.");
+  }
+
+  async function useTemplate(id: string) {
+    setTemplateLoading(true);
+    try {
+      const response = await fetch("/api/pipeline-templates?id=" + encodeURIComponent(id), { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Unable to load template");
+      applyGraph(data.template.graph, data.template.name);
+      setShowTemplates(false);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to load template");
+    } finally {
+      setTemplateLoading(false);
+    }
+  }
+
+  async function autoGenerate() {
+    if (!applicationId) {
+      setMessage("Select an application before generating a pipeline.");
+      return;
+    }
+    const application = applications.find((item) => item.id === applicationId);
+    if (!application?.repository_url) {
+      setMessage("The selected application does not have a repository URL.");
+      return;
+    }
+
+    setGenerating(true);
+    setMessage("");
+    try {
+      const response = await fetch("/api/repository/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repositoryUrl: application.repository_url, branch: application.default_branch || "main" }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Repository analysis failed");
+
+      const analysis = data.analysis;
+      const generated: any[] = [];
+      const addGenerated = (type: StageType, label: string, config: StageConfig = {}) => {
+        const def = definitions.find((item) => item.type === type)!;
+        generated.push({
+          id: type + "-" + (generated.length + 1),
+          type: "stage",
+          position: { x: 100 + (generated.length % 3) * 300, y: 80 + Math.floor(generated.length / 3) * 190 },
+          data: { label, detail: def.detail, type, config: { ...def.defaults, ...config } },
+        });
+      };
+
+      addGenerated("source", "Git Checkout", { provider: "GitHub", repository: data.repository.url, branch: data.repository.branch });
+      addGenerated("build", "Build", { buildTool: analysis.buildTool, command: analysis.buildCommand });
+      if (analysis.testCommand) addGenerated("test", "Test", { testCommand: analysis.testCommand });
+      addGenerated("security", "Security Scan", { scanners: ["Trivy"], failOn: "High or Critical" });
+      if (analysis.dockerfile) addGenerated("image", "Build Image", { registry: "Artifact Registry", tag: "$(commit)" });
+      addGenerated("deploy", "Kubernetes Deploy", { target: "Kubernetes", namespace: namespace || "default", manifestPath: "k8s/", strategy: "Rolling" });
+      addGenerated("verify", "Deployment Verify", { check: "Kubernetes rollout", timeout: "10m", onFailure: "Fail" });
+
+      const generatedNodes = generated as StageNode[];
+      const generatedEdges = generatedNodes.slice(1).map((item, index) => ({
+        id: generatedNodes[index].id + "-" + item.id,
+        source: generatedNodes[index].id,
+        target: item.id,
+      }));
+      setNodes(generatedNodes);
+      setEdges(generatedEdges);
+      setSelectedId(generatedNodes[0]?.id || "");
+      setRuntime(analysis.runtime + "-" + analysis.runtimeVersion);
+      setPipelineName(data.repository.repo + "-delivery");
+      setMessage("Generated from repository analysis: " + (analysis.framework || analysis.runtime) + " · " + analysis.confidence + " confidence. Review stages before deployment.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to generate pipeline");
+    } finally {
+      setGenerating(false);
+    }
+  }
 
   const onConnect = useCallback((connection: Connection) => {
     if (!connection.source || !connection.target || connection.source === connection.target) return;
@@ -356,7 +477,7 @@ export default function PipelineStudio() {
     <main className="studio-shell">
       <header className="studio-topbar">
         <div className="studio-title"><a href="/" className="studio-logo">TF</a><div><div className="studio-breadcrumb"><a href="/">TekForge</a><span>/</span><strong>Pipeline Studio</strong></div><div className="studio-name"><input value={pipelineName} onChange={(e) => setPipelineName(e.target.value)} aria-label="Pipeline name" /><span className="saved-dot" title="Local changes"></span></div></div></div>
-        <div className="studio-actions"><span className="studio-status"><i /> {nodes.length} stages · {edges.length} connections</span><button className="tool-button" onClick={() => setShowLibrary((value) => !value)}>Stages</button><button className="tool-button" onClick={() => setShowCompile(true)} disabled={!compileResult}>Code</button><button className="tool-button" onClick={() => { setNodes(initialNodes); setEdges(initialEdges); setSelectedId(initialNodes[0]?.id || ""); }}>Reset</button><button className="tool-button" disabled={saving} onClick={savePipeline}>{saving ? "Saving…" : "Save"}</button><button className="compile-button" disabled={saving} onClick={compile}>{saving ? "Validating…" : "Validate & compile"}</button></div>
+        <div className="studio-actions"><span className="studio-status"><i /> {nodes.length} stages · {edges.length} connections</span><button className="tool-button" onClick={openTemplates}>Templates</button><button className="tool-button" onClick={autoGenerate} disabled={generating}>{generating ? "Analyzing…" : "Auto generate"}</button><button className="tool-button" onClick={() => setShowLibrary((value) => !value)}>Stages</button><button className="tool-button" onClick={() => setShowCompile(true)} disabled={!compileResult}>Code</button><button className="tool-button" onClick={() => { setNodes(initialNodes); setEdges(initialEdges); setSelectedId(initialNodes[0]?.id || ""); }}>Reset</button><button className="tool-button" disabled={saving} onClick={savePipeline}>{saving ? "Saving…" : "Save"}</button><button className="compile-button" disabled={saving} onClick={compile}>{saving ? "Validating…" : "Validate & compile"}</button></div>
       </header>
 
       <div className="studio-workspace">
@@ -383,6 +504,21 @@ export default function PipelineStudio() {
         </aside>
       </div>
 
+      {showTemplates && <div className="template-overlay" onClick={() => setShowTemplates(false)}>
+        <div className="template-modal" onClick={(event) => event.stopPropagation()}>
+          <div className="template-head">
+            <div><div className="panel-kicker">PIPELINE TEMPLATES</div><h2>Start from a proven delivery pattern</h2><p>Templates are editable graphs, not locked workflows. Load one, configure it, then validate and deploy.</p></div>
+            <button className="panel-close" onClick={() => setShowTemplates(false)}>×</button>
+          </div>
+          {templateLoading ? <div className="template-loading">Loading templates…</div> : <div className="template-grid">{templates.map((template) => <button key={template.id} className="template-card" onClick={() => useTemplate(template.id)}>
+            <div className="template-card-top"><span className="template-category">{template.category}</span>{template.featured && <span className="template-featured">Featured</span>}</div>
+            <h3>{template.name}</h3>
+            <p>{template.description}</p>
+            <div className="template-tags">{(template.tags || []).map((tag: string) => <span key={tag}>{tag}</span>)}</div>
+            <div className="template-use">Use template <b>→</b></div>
+          </button>)}</div>}
+        </div>
+      </div>}
       {showCompile && <div className="code-overlay"><div className="code-modal"><div className="code-modal-head"><div><div className="panel-kicker">TEKTON OUTPUT</div><h2>Compiled pipeline</h2></div><button className="panel-close" onClick={() => setShowCompile(false)}>×</button></div><pre>{compileResult || "Run Validate & compile to generate Tekton resources."}</pre></div></div>}
     </main>
   );

@@ -145,10 +145,13 @@ export default function PipelineStudio() {
     if (!clusterId) { setMessage("Enter a connected cluster ID."); return; }
     setSaving(true); setMessage("");
     try {
-      let targetPipelineId = pipelineId;
-      if (!targetPipelineId) {
-        targetPipelineId = await savePipeline();
-        if (!targetPipelineId) return;
+      let targetPipelineId: string;
+      if (pipelineId) {
+        targetPipelineId = pipelineId;
+      } else {
+        const savedPipelineId = await savePipeline();
+        if (!savedPipelineId) return;
+        targetPipelineId = savedPipelineId;
       }
       const response = await fetch(`/api/pipelines/${targetPipelineId}/deploy`, {
         method: "POST",

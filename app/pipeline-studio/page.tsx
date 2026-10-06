@@ -123,8 +123,8 @@ export default function PipelineStudio() {
     };
   }
 
-  async function savePipeline() {
-    if (!applicationId) { setMessage("Open Pipeline Studio with an applicationId, for example /pipeline-studio?applicationId=<id>."); return; }
+  async function savePipeline(): Promise<string | null> {
+    if (!applicationId) { setMessage("Open Pipeline Studio with an applicationId, for example /pipeline-studio?applicationId=<id>."); return null; }
     setSaving(true); setMessage("");
     try {
       const response = await fetch("/api/pipelines", {
@@ -145,7 +145,7 @@ export default function PipelineStudio() {
     if (!clusterId) { setMessage("Enter a connected cluster ID."); return; }
     setSaving(true); setMessage("");
     try {
-      const response = await fetch(`/api/pipelines/${pipelineId}/deploy`, {
+      const response = await fetch(`/api/pipelines/${targetPipelineId}/deploy`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clusterId, namespace, graph: graphPayload() }),

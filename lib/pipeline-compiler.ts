@@ -64,7 +64,7 @@ function scriptFor(node: PipelineGraph["nodes"][number]) {
     case "source":
       return [
         "rm -rf /workspace/source/*",
-        "git clone " + shellQuote(config.repository || "$(params.repository)") + " /workspace/source",
+        "git clone " + shellQuote("$(params.repository)") + " /workspace/source",
         config.branch ? "cd /workspace/source && git checkout " + shellQuote(config.branch) : "true",
       ];
     case "build":
@@ -123,9 +123,22 @@ function scriptFor(node: PipelineGraph["nodes"][number]) {
           " --namespace " + shellQuote(config.namespace || "default") + " --create-namespace" +
           (config.values ? " -f " + shellQuote(config.values) : ""),
       ];
-    case "gitops":
-      return ["echo GitOps sync requested for " + shellQuote(config.application || "application")];
+    case "gitops": {
+      const server = String(config.serverUrl || "").replace(/\/$/, "");
+      const app = String(config.application || "");
+      if (!server || !app) return ["echo 'GitOps configuration requires Argo CD server URL and application name'; exit 1"];
+      const revision = String(config.revision || "main");
+      const token = config.credentialSecret ? " -H \"Authorization: Bearer $ARGOCD_AUTH_TOKEN\"" : "";
+      const body = JSON.stringify({ revision, prune: true, dryRun: false });
+      return [
+        "curl --fail --silent --show-error -X POST " + shellQuote(server + "/api/v1/applications/" + app + "/sync") + " -H 'Content-Type: application/json'" + token + " --data " + shellQuote(body),
+      ];
+    }
     case "verify":
+      if (config.check === "Prometheus metric" && config.serverUrl && config.query) {
+        const query = encodeURIComponent(String(config.query));
+        return ["curl --fail --silent --show-error --max-time 30 " + shellQuote(String(config.serverUrl).replace(/\/$/, "") + "/api/v1/query?query=" + query) + " | grep -q 'success'"];
+      }
       if (config.check === "HTTP smoke test" && config.endpoint) {
         return ["curl --fail --silent --show-error --max-time 30 " + shellQuote(config.endpoint)];
       }
@@ -133,8 +146,14 @@ function scriptFor(node: PipelineGraph["nodes"][number]) {
       return ["kubectl rollout status -f /workspace/source/" + manifestPath.replace(/^\/+/, "") + " -R --timeout=" + timeout];
     case "approval":
       return ["echo Approval gate passed"];
-    case "notify":
-      return ["echo Notification requested for " + String(config.event || "completion")];
+    case "notify": {
+      if (!config.target) return ["echo 'Notification target is not configured'; exit 1"];
+      const message = String(config.message || "TekForge pipeline completed");
+      if (String(config.channel || "Slack") === "Webhook") {
+        return ["curl --fail --silent --show-error -X POST " + shellQuote(config.target) + " -H 'Content-Type: application/json' --data " + shellQuote(JSON.stringify({ text: message }))];
+      }
+      return ["echo " + shellQuote("Notification requested for " + String(config.event || "completion") + ": " + message)];
+    }
     case "rollback":
       if (target === "Helm") {
         return ["helm rollback " + shellQuote(config.release || "tekforge-app") + " 0 --namespace " + shellQuote(config.namespace || "default")];
@@ -149,7 +168,20 @@ function taskEnv(node: PipelineGraph["nodes"][number]) {
   if (!secret) return "";
   const tool = String(config.tool || "");
   if (tool === "sonarqube" || tool === "sonarcloud") {
-    return `\n      env:\n        - name: SONAR_TOKEN\n          valueFrom:\n            secretKeyRef:\n              name: ${safeName(secret)}\n              key: SONAR_TOKEN`;
+    return `\n      env:
+        - name: SONAR_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: ${safeName(secret)}
+              key: SONAR_TOKEN`;
+  }
+  if (node.type === "gitops") {
+    return `\n      env:
+        - name: ARGOCD_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: ${safeName(secret)}
+              key: ARGOCD_AUTH_TOKEN`;
   }
   return "";
 }

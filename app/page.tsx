@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 
-const nav = ["Dashboard", "Projects", "Applications", "Pipelines", "Pipeline Studio", "Deployments", "Environments"];
+const nav = ["Dashboard", "Projects", "Applications", "Pipelines", "Pipeline Studio", "Agents", "Deployments", "Environments"];
 const steps = ["Checkout", "Build", "Test", "Security", "Image", "Deploy"];
 
 type Project = { id: string; name: string; description?: string | null; created_at?: string };
@@ -25,6 +25,7 @@ export default function Home() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [applications, setApplications] = useState<Application[]>([]);
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
+  const [agents, setAgents] = useState<any[]>([]);
   const [projectName, setProjectName] = useState("");
   const [projectDescription, setProjectDescription] = useState("");
   const [showProjectForm, setShowProjectForm] = useState(false);
@@ -48,7 +49,7 @@ export default function Home() {
     setApplications(data.applications || []);
   }
 
-  async function loadPipelines() {
+  async function loadAgents() {\n    const response = await fetch("/api/agent/clusters", { cache: "no-store" });\n    const data = await response.json();\n    if (!response.ok) throw new Error(data.error || "Unable to load agents");\n    setAgents(data.clusters || []);\n  }\n\n  async function loadPipelines() {
     const response = await fetch("/api/pipelines", { cache: "no-store" });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Unable to load pipelines");
@@ -58,7 +59,7 @@ export default function Home() {
   useEffect(() => {
     loadProjects().catch((error) => setMessage(error instanceof Error ? error.message : "Unable to load projects"));
     loadApplications().catch(() => undefined);
-    loadPipelines().catch(() => undefined);
+    loadPipelines().catch(() => undefined);\n    loadAgents().catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -118,7 +119,7 @@ export default function Home() {
         <div className="brand"><span className="brand-mark">TF</span><span>TekForge</span></div>
         <div className="runtime"><span className="runtime-dot" /> GKE runtime connected</div>
         <div className="nav-label">Workspace</div>
-        {nav.map((item) => <button key={item} className={`nav-item ${active === item ? "active" : ""}`} onClick={() => { if (item === "Pipeline Studio") { window.location.href = "/pipeline-studio"; return; } setActive(item); setMessage(""); }}><span className="nav-icon">{item === "Dashboard" ? "⌂" : item === "Projects" ? "▦" : item === "Applications" ? "◈" : item === "Pipelines" ? "⑂" : item === "Pipeline Studio" ? "✦" : item === "Deployments" ? "↑" : "◇"}</span>{item}</button>)}
+        {nav.map((item) => <button key={item} className={`nav-item ${active === item ? "active" : ""}`} onClick={() => { if (item === "Pipeline Studio") { window.location.href = "/pipeline-studio"; return; } setActive(item); setMessage(""); }}><span className="nav-icon">{item === "Dashboard" ? "⌂" : item === "Projects" ? "▦" : item === "Applications" ? "◈" : item === "Pipelines" ? "⑂" : item === "Pipeline Studio" ? "✦" : item === "Agents" ? "◉" : item === "Deployments" ? "↑" : "◇"}</span>{item}</button>)}
         <div className="nav-label">Platform</div>
         <div className="side-link">Tekton <span>Healthy</span></div>
         <div className="side-link">Artifact Registry <span>Ready</span></div>
@@ -126,11 +127,11 @@ export default function Home() {
       </aside>
 
       <main className="main">
-        <header className="topbar"><div><p className="eyebrow">Developer platform / Control plane</p><h1>{active}</h1><p className="subtitle">Build, test, secure and deploy applications through one Kubernetes-native workflow.</p></div><div className="top-actions"><button className="secondary">Documentation</button><div className="avatar">VK</div></div></header>
+        <header className="topbar"><div><p className="eyebrow">Developer platform / Control plane</p><h1>{active}</h1><p className="subtitle">Build, test, secure and deploy applications through one Kubernetes-native workflow.</p></div><div className="top-actions"><button className="secondary">Documentation</button><button className="secondary" onClick={() => { window.location.href = "/agents"; }}>Agents</button><div className="avatar">VK</div></div></header>
 
         {active === "Dashboard" && <>
           <section className="hero card"><div><div className="eyebrow strong">SHIP WITH CONFIDENCE</div><h2>From Git push to GKE deployment.</h2><p>Connect a repository, let TekForge detect its runtime, then generate and execute the appropriate Tekton delivery plan.</p></div><div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}><button className="primary" onClick={() => setActive("Applications")}>Connect repository</button><button className="secondary" onClick={() => { window.location.href = "/pipeline-studio"; }}>Open Pipeline Studio</button></div></section>
-          <section className="section"><div className="section-head"><div><h2>Platform overview</h2><div className="metric-label">Live Supabase control-plane data</div></div><span className="live-badge"><span className="runtime-dot" /> LIVE</span></div><div className="grid"><div className="card metric-card"><div className="metric-label">Projects</div><div className="metric">{projects.length}</div><div className="delta">Supabase</div></div><div className="card metric-card"><div className="metric-label">Applications</div><div className="metric">{applications.length}</div><div className="delta">Connected to Git</div></div><div className="card metric-card"><div className="metric-label">Pipelines</div><div className="metric">{pipelines.length}</div><div className="delta">Tekton plans</div></div><div className="card metric-card"><div className="metric-label">Runtime</div><div className="metric">GKE</div><div className="delta">Connected</div></div></div></section>
+          <section className="section"><div className="section-head"><div><h2>Platform overview</h2><div className="metric-label">Live Supabase control-plane data</div></div><span className="live-badge"><span className="runtime-dot" /> LIVE</span></div><div className="grid"><div className="card metric-card"><div className="metric-label">Projects</div><div className="metric">{projects.length}</div><div className="delta">Supabase</div></div><div className="card metric-card"><div className="metric-label">Applications</div><div className="metric">{applications.length}</div><div className="delta">Connected to Git</div></div><div className="card metric-card"><div className="metric-label">Pipelines</div><div className="metric">{pipelines.length}</div><div className="delta">Tekton plans</div></div><div className="card metric-card"><div className="metric-label">Agents</div><div className="metric">{agents.filter((a) => a.status === "connected").length}</div><div className="delta">{agents.length ? "Kubernetes clusters" : "Install your first agent"}</div></div></div></section>
           <section className="section pipeline-card card"><div className="section-head"><div><h2>Delivery pipeline</h2><div className="metric-label">Runtime-aware TekForge workflow</div></div><span className="badge success">READY</span></div><div className="flow">{steps.map((step, i) => <div className="flow-step" key={step}><div className="flow-node"><span className="step-number">{i + 1}</span><strong>{step}</strong><small>{step === "Security" ? "Trivy scan" : step === "Image" ? "Artifact Registry" : step === "Deploy" ? "GKE rollout" : "Tekton Task"}</small></div>{i < steps.length - 1 && <span className="flow-arrow">→</span>}</div>)}</div></section>
         </>}
 
@@ -148,7 +149,7 @@ export default function Home() {
 
         {active === "Pipelines" && <section className="section"><div className="card"><div className="section-head"><div><h2>Pipelines</h2><div className="metric-label">Live pipeline definitions generated for applications.</div></div><div style={{ display: "flex", gap: 10 }}><button className="secondary" onClick={() => loadPipelines().catch((error) => setMessage(error instanceof Error ? error.message : "Unable to refresh pipelines"))}>Refresh</button><button className="primary" onClick={() => { window.location.href = "/pipeline-studio"; }}>Design pipeline</button></div></div>{message && <div className="helper" style={{ marginBottom: 16 }}>{message}</div>}{pipelines.length === 0 ? <div className="empty-state"><h2>No pipelines yet</h2><p className="subtitle">Create an application to automatically generate its pipeline.</p><button className="primary" onClick={() => setActive("Applications")}>Create application</button></div> : <div className="project-list">{pipelines.map((pipeline) => <div className="run" key={pipeline.id}><div className="project-icon">⑂</div><div className="run-main"><div className="run-title">{pipeline.name}</div><div className="run-meta">{pipeline.applications?.name || "Application"} · template: {pipeline.template} · Tekton: {pipeline.tekton_pipeline_name || "not linked"}</div></div><span className="badge success">READY</span></div>)}</div>}</div></section>}
 
-        {active !== "Dashboard" && active !== "Applications" && active !== "Projects" && active !== "Pipelines" && <div className="card empty-state"><div className="empty-icon">{active.slice(0, 1)}</div><h2>{active}</h2><p className="subtitle">This workspace is ready for the live Supabase and Tekton integration.</p><button className="primary" onClick={() => setActive("Applications")}>Connect an application</button></div>}
+        {active === "Agents" && <div className="card"><div className="section-head"><div><h2>Kubernetes Agents</h2><div className="metric-label">Connect your cluster to unlock agent-backed deployments.</div></div><button className="primary" onClick={() => { window.location.href = "/agents"; }}>Install Agent</button></div>{agents.length === 0 ? <div className="empty-state"><h2>No agents connected</h2><p className="subtitle">Install the TekForge agent into GKE, EKS, AKS or an on-prem Kubernetes cluster.</p></div> : <div className="project-list">{agents.map((agent) => <div className="run" key={agent.id}><StatusDot status={agent.status} /><div className="run-main"><div className="run-title">{agent.name}</div><div className="run-meta">{agent.provider} · Kubernetes {agent.kubernetes_version || "unknown"} · {agent.nodes} nodes · {agent.pods} pods</div></div><span className={`badge ${agent.status === "connected" ? "success" : "failed"}`}>{agent.status}</span></div>)}</div>}</div>}\n\n        {active !== "Dashboard" && active !== "Applications" && active !== "Projects" && active !== "Pipelines" && active !== "Agents" && <div className="card empty-state"><div className="empty-icon">{active.slice(0, 1)}</div><h2>{active}</h2><p className="subtitle">This workspace is ready for the live Supabase and Tekton integration.</p><button className="primary" onClick={() => setActive("Applications")}>Connect an application</button></div>}
       </main>
     </div>
   );

@@ -183,6 +183,8 @@ export default function PipelineStudio() {
   const [templates, setTemplates] = useState<any[]>([]);
   const [templateLoading, setTemplateLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<{ state: "idle" | "testing" | "connected" | "failed"; message?: string }>({ state: "idle" });
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -447,6 +449,63 @@ export default function PipelineStudio() {
     finally { setSaving(false); }
   }
 
+  async function testIntegrationConnection() {
+    if (!selected || selected.data.type !== "quality") return;
+    const tool = selected.data.config.tool || "sonarqube";
+    if (!["sonarqube", "sonarcloud"].includes(tool)) {
+      setConnectionStatus({ state: "connected", message: "This integration does not require an external connection." });
+      return;
+    }
+    if (!clusterId) {
+      setConnectionStatus({ state: "failed", message: "Select a connected cluster first. The test runs from the agent cluster so private SonarQube URLs work." });
+      return;
+    }
+    if (!selected.data.config.serverUrl) {
+      setConnectionStatus({ state: "failed", message: "Enter the SonarQube/SonarCloud URL first." });
+      return;
+    }
+    setTestingConnection(true);
+    setConnectionStatus({ state: "testing", message: "Testing from the connected cluster agent…" });
+    try {
+      const response = await fetch("/api/integrations/test-connection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clusterId,
+          namespace,
+          integration: tool,
+          serverUrl: selected.data.config.serverUrl,
+          credentialSecret: selected.data.config.credentialSecret || null,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Unable to start connection test");
+      if (!data.commandId) {
+        setConnectionStatus({ state: data.status === "ready" ? "connected" : "failed", message: data.message });
+        return;
+      }
+
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        const statusResponse = await fetch(`/api/integrations/test-connection/status?id=${encodeURIComponent(data.commandId)}`, { cache: "no-store" });
+        const status = await statusResponse.json();
+        if (status.status === "completed") {
+          setConnectionStatus({
+            state: "connected",
+            message: `${tool === "sonarcloud" ? "SonarCloud" : "SonarQube"} connected successfully · ${status.result?.systemStatus || "UP"}${status.result?.credentialValidated ? " · credential validated" : ""}`,
+          });
+          return;
+        }
+        if (status.status === "failed") throw new Error(status.error || "Connection test failed");
+      }
+      throw new Error("Connection test timed out. Check that the agent is connected and can reach the configured URL.");
+    } catch (error) {
+      setConnectionStatus({ state: "failed", message: error instanceof Error ? error.message : "Connection test failed" });
+    } finally {
+      setTestingConnection(false);
+    }
+  }
+
   async function compile() {
     setSaving(true); setMessage("");
     try {
@@ -473,7 +532,7 @@ export default function PipelineStudio() {
         {selected.data.type === "build" && <><Field label="Build system"><select value={c.buildTool || "Auto detect"} onChange={(e) => updateSelectedConfig("buildTool", e.target.value)}><option>Auto detect</option><option>npm</option><option>pnpm</option><option>yarn</option><option>Maven</option><option>Gradle</option><option>pip</option><option>Go</option></select></Field><Field label="Build command"><input value={c.command || ""} onChange={(e) => updateSelectedConfig("command", e.target.value)} placeholder="npm run build" /></Field></>}
         {selected.data.type === "test" && <><Field label="Testing tool"><select value={c.tool || "test-command"} onChange={(e) => { const tool = e.target.value; const item = getTaskCatalogItem(tool); updateSelectedConfig("tool", tool); if (item) { for (const field of item.fields) if (field.defaultValue !== undefined) updateSelectedConfig(field.key as keyof StageConfig, String(field.defaultValue)); } }}>{taskCatalog.filter((item) => item.category === "Testing").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><small>{getTaskCatalogItem(c.tool || "test-command")?.description}</small></Field><Field label="Test command"><input value={c.testCommand || ""} onChange={(e) => updateSelectedConfig("testCommand", e.target.value)} placeholder="npm test" /></Field><Field label="Coverage"><select value={c.coverage ? "yes" : "no"} onChange={(e) => updateSelectedConfig("coverage", e.target.value === "yes")}><option value="yes">Collect coverage</option><option value="no">Skip coverage</option></select></Field><Field label="Coverage output"><input value={c.coveragePath || ""} onChange={(e) => updateSelectedConfig("coveragePath", e.target.value)} placeholder="coverage/lcov.info" /></Field><Field label="Base URL (E2E)"><input value={c.baseUrl || ""} onChange={(e) => updateSelectedConfig("baseUrl", e.target.value)} placeholder="https://staging.example.com" /></Field><Field label="Timeout"><select value={c.timeout || "10m"} onChange={(e) => updateSelectedConfig("timeout", e.target.value)}><option>5m</option><option>10m</option><option>20m</option><option>30m</option><option>60m</option></select></Field></>}
         {selected.data.type === "security" && <><Field label="Primary scanner"><select value={c.tool || "trivy"} onChange={(e) => updateSelectedConfig("tool", e.target.value)}><option value="trivy">Trivy</option><option value="gitleaks">Gitleaks</option><option value="dependency-scan">Dependency Scan</option></select></Field><div className="inspector-label">Additional scanners</div><div className="check-grid">{["Trivy","Gitleaks","Dependency"].map((scanner) => <button type="button" key={scanner} className={`check-chip ${c.scanners?.includes(scanner) ? "checked" : ""}`} onClick={() => toggleScanner(scanner)}><span>{c.scanners?.includes(scanner) ? "✓" : ""}</span>{scanner}</button>)}</div><Field label="Severity"><select value={c.severity || "HIGH,CRITICAL"} onChange={(e) => updateSelectedConfig("severity", e.target.value)}><option>CRITICAL</option><option>HIGH,CRITICAL</option><option>MEDIUM,HIGH,CRITICAL</option></select></Field><Field label="Fail pipeline on"><select value={String(c.failOn || "High or Critical")} onChange={(e) => updateSelectedConfig("failOn", e.target.value)}><option>Critical</option><option>High or Critical</option><option>Never</option></select></Field><Field label="Credential Secret (optional)"><input value={c.credentialSecret || ""} onChange={(e) => updateSelectedConfig("credentialSecret", e.target.value)} placeholder="registry-credentials" /></Field></>}
-        {selected.data.type === "quality" && <><Field label="Quality tool"><select value={c.tool || "sonarqube"} onChange={(e) => updateSelectedConfig("tool", e.target.value)}><option value="sonarqube">SonarQube</option><option value="sonarcloud">SonarCloud</option></select></Field><Field label="Server URL" hint="For self-hosted SonarQube use your reachable cluster URL"><input value={c.serverUrl || ""} onChange={(e) => updateSelectedConfig("serverUrl", e.target.value)} placeholder="https://sonarqube.example.com" /></Field><Field label="Project key"><input value={c.projectKey || ""} onChange={(e) => updateSelectedConfig("projectKey", e.target.value)} placeholder="my-service" /></Field><Field label="Organization (SonarCloud)"><input value={c.organization || ""} onChange={(e) => updateSelectedConfig("organization", e.target.value)} placeholder="my-org" /></Field><Field label="Kubernetes Secret" hint="Secret must contain SONAR_TOKEN. TekForge only stores the secret name."><input value={c.credentialSecret || ""} onChange={(e) => updateSelectedConfig("credentialSecret", e.target.value)} placeholder="sonarqube-credentials" /></Field><Field label="Sources"><input value={c.sources || "."} onChange={(e) => updateSelectedConfig("sources", e.target.value)} /></Field><Field label="Quality gate"><select value={c.qualityGate || "Wait and fail"} onChange={(e) => updateSelectedConfig("qualityGate", e.target.value)}><option>Wait and fail</option><option>Wait and warn</option><option>Do not wait</option></select></Field><Field label="Timeout"><select value={c.timeout || "10m"} onChange={(e) => updateSelectedConfig("timeout", e.target.value)}><option>5m</option><option>10m</option><option>20m</option><option>30m</option></select></Field></>}
+        {selected.data.type === "quality" && <><Field label="Quality tool"><select value={c.tool || "sonarqube"} onChange={(e) => updateSelectedConfig("tool", e.target.value)}><option value="sonarqube">SonarQube</option><option value="sonarcloud">SonarCloud</option></select></Field><Field label="Server URL" hint="For self-hosted SonarQube use your reachable cluster URL"><input value={c.serverUrl || ""} onChange={(e) => updateSelectedConfig("serverUrl", e.target.value)} placeholder="https://sonarqube.example.com" /></Field><Field label="Project key"><input value={c.projectKey || ""} onChange={(e) => updateSelectedConfig("projectKey", e.target.value)} placeholder="my-service" /></Field><Field label="Organization (SonarCloud)"><input value={c.organization || ""} onChange={(e) => updateSelectedConfig("organization", e.target.value)} placeholder="my-org" /></Field><Field label="Kubernetes Secret" hint="Secret must contain SONAR_TOKEN. TekForge only stores the secret name."><input value={c.credentialSecret || ""} onChange={(e) => updateSelectedConfig("credentialSecret", e.target.value)} placeholder="sonarqube-credentials" /></Field><div className="connection-test"><button type="button" className="connection-test-button" onClick={testIntegrationConnection} disabled={testingConnection}>{testingConnection ? "Testing connection…" : "Test connection"}</button>{connectionStatus.state !== "idle" && <div className={`connection-result ${connectionStatus.state}`}>{connectionStatus.state === "connected" ? "✓ " : connectionStatus.state === "failed" ? "⚠ " : "• "}{connectionStatus.message}</div>}</div><Field label="Sources"><input value={c.sources || "."} onChange={(e) => updateSelectedConfig("sources", e.target.value)} /></Field><Field label="Quality gate"><select value={c.qualityGate || "Wait and fail"} onChange={(e) => updateSelectedConfig("qualityGate", e.target.value)}><option>Wait and fail</option><option>Wait and warn</option><option>Do not wait</option></select></Field><Field label="Timeout"><select value={c.timeout || "10m"} onChange={(e) => updateSelectedConfig("timeout", e.target.value)}><option>5m</option><option>10m</option><option>20m</option><option>30m</option></select></Field></>}
         {selected.data.type === "image" && <><Field label="Container registry"><select value={c.registry || "Artifact Registry"} onChange={(e) => updateSelectedConfig("registry", e.target.value)}><option>Artifact Registry</option><option>Docker Hub</option><option>Amazon ECR</option><option>Google Artifact Registry</option><option>Custom registry</option></select></Field><Field label="Image repository"><input value={c.image || ""} onChange={(e) => updateSelectedConfig("image", e.target.value)} placeholder="us-central1-docker.pkg.dev/project/app" /></Field><Field label="Image tag"><input value={c.tag || "$(commit)"} onChange={(e) => updateSelectedConfig("tag", e.target.value)} placeholder="$(commit)" /></Field></>}
         {selected.data.type === "deploy" && <><Field label="Deployment target"><select value={c.target || "Kubernetes"} onChange={(e) => updateSelectedConfig("target", e.target.value)}><option>Kubernetes</option><option>Helm</option><option>Argo CD</option></select></Field><Field label="Namespace"><input value={c.namespace || "default"} onChange={(e) => updateSelectedConfig("namespace", e.target.value)} /></Field><Field label="Manifest / chart path"><input value={c.manifestPath || "k8s/"} onChange={(e) => updateSelectedConfig("manifestPath", e.target.value)} /></Field><Field label="Rollout strategy"><select value={c.strategy || "Rolling"} onChange={(e) => updateSelectedConfig("strategy", e.target.value)}><option>Rolling</option><option>Recreate</option><option>Canary</option></select></Field></>}
         {selected.data.type === "approval" && <><Field label="Environment"><select value={c.environment || "production"} onChange={(e) => updateSelectedConfig("environment", e.target.value)}><option>development</option><option>qa</option><option>staging</option><option>production</option></select></Field><Field label="Approval message"><textarea value={c.message || ""} onChange={(e) => updateSelectedConfig("message", e.target.value)} placeholder="Approve production deployment" rows={3} /></Field><Field label="Approval timeout"><select value={c.timeout || "24h"} onChange={(e) => updateSelectedConfig("timeout", e.target.value)}><option>1h</option><option>4h</option><option>24h</option><option>72h</option></select></Field></>}

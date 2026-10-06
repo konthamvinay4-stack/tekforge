@@ -14,7 +14,7 @@ export async function POST(request: Request) {
 
     const clusterId = randomUUID();
     const now = Date.now();
-    const expiresAt = now + 30 * 60 * 1000;
+    const expiresAt = now + 30 * 24 * 60 * 60 * 1000;
     const payload = Buffer.from(JSON.stringify({ clusterId, name, provider, issuedAt: now, expiresAt })).toString("base64url");
     const signature = createHmac("sha256", secret()).update(payload).digest("base64url");
 

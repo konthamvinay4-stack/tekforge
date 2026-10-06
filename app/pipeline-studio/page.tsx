@@ -176,7 +176,8 @@ export default function PipelineStudio() {
     finally { setSaving(false); }
   }
 
-\n  async function compile() {
+
+  async function compile() {
     setSaving(true);
     setCompileResult("");
     const graph = {

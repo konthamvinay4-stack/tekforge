@@ -14,7 +14,8 @@ function safeName(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "stage";
 }
 
-function taskFor(node: PipelineGraph["nodes"][number]) {\n  const config = node.config || {};
+function taskFor(node: PipelineGraph["nodes"][number]) {
+  const config = node.config || {};
   const name = safeName(node.id);
   const imageByType: Record<PipelineStageType, string> = {
     source: "alpine/git:2.47.2",

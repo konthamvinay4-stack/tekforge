@@ -259,3 +259,14 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .template-use { display:flex; align-items:center; justify-content:space-between; margin-top:auto; padding-top:14px; color:#3c6fce; font-size:8px; font-weight:750; }
 .template-use b { font-size:12px; font-weight:500; }
 @media (max-width:700px) { .template-grid { grid-template-columns:1fr; }.template-head { padding:17px; }.template-modal { max-height:88vh; } }
+
+
+/* Integration connection test */
+.connection-test { display: grid; gap: 8px; margin: 4px 0 10px; }
+.connection-test-button { width: 100%; border: 1px solid rgba(120,130,150,.24); border-radius: 10px; padding: 9px 12px; background: rgba(255,255,255,.04); color: inherit; font-weight: 600; cursor: pointer; }
+.connection-test-button:hover:not(:disabled) { background: rgba(255,255,255,.08); }
+.connection-test-button:disabled { opacity: .55; cursor: wait; }
+.connection-result { border-radius: 9px; padding: 8px 10px; font-size: 12px; line-height: 1.45; }
+.connection-result.connected { background: rgba(54,190,120,.10); color: #37c783; }
+.connection-result.failed { background: rgba(230,90,90,.10); color: #ef7777; }
+.connection-result.testing { background: rgba(100,140,220,.10); color: #83a9ee; }

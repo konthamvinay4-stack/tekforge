@@ -57,7 +57,7 @@ export function validateGraph(graph: PipelineGraph) {
   }
 }
 
-export function compileToTekton(graph: PipelineGraph) {
+export function compileToTekton(graph: PipelineGraph, pipelineName = "tekforge-generated") {
   validateGraph(graph);
   const taskYaml = graph.nodes.map(taskFor).join("---\n");
   const pipelineTasks = graph.nodes.map((node) => {
@@ -71,7 +71,7 @@ export function compileToTekton(graph: PipelineGraph) {
   const pipelineResource = {
     apiVersion: "tekton.dev/v1",
     kind: "Pipeline",
-    metadata: { name: "tekforge-generated", labels: { "tekforge.dev/runtime": safeName(graph.runtime), "tekforge.dev/environment": safeName(graph.environment) } },
+    metadata: { name: safeName(pipelineName), labels: { "tekforge.dev/runtime": safeName(graph.runtime), "tekforge.dev/environment": safeName(graph.environment) } },
     spec: {
       params: [{ name: "repository", type: "string" }, { name: "image", type: "string" }],
       workspaces: [{ name: "shared-source" }],

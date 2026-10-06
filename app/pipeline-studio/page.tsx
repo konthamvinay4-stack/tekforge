@@ -206,7 +206,7 @@ export default function PipelineStudio() {
         : [];
       const existing = pipeline
         ? pipelineData.pipelines?.find((item: any) => item.id === pipeline)
-        : applicationPipelines[0];
+        : (isNew ? null : applicationPipelines[0]);
       if (selectedApplication) setApplicationId(selectedApplication.id);
       if (existing) setPipelineId(existing.id);
 

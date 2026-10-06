@@ -6,7 +6,7 @@ export type PipelineGraph = {
   version: number;
   runtime: string;
   environment: string;
-  nodes: Array<{ id: string; type: PipelineStageType; label: string; detail?: string }>;
+  nodes: Array<{ id: string; type: PipelineStageType; label: string; detail?: string; config?: Record<string, unknown> }>;
   edges: Array<{ from: string; to: string }>;
 };
 
@@ -14,7 +14,7 @@ function safeName(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "stage";
 }
 
-function taskFor(node: PipelineGraph["nodes"][number]) {
+function taskFor(node: PipelineGraph["nodes"][number]) {\n  const config = node.config || {};
   const name = safeName(node.id);
   const imageByType: Record<PipelineStageType, string> = {
     source: "alpine/git:2.47.2",
@@ -26,11 +26,11 @@ function taskFor(node: PipelineGraph["nodes"][number]) {
     approval: "alpine:3.22",
   };
   const commandByType: Record<PipelineStageType, string[]> = {
-    source: ["rm -rf /workspace/source/*", "git clone $(params.repository) /workspace/source"],
-    build: ["cd /workspace/source", "if [ -f package-lock.json ]; then npm ci; elif [ -f pnpm-lock.yaml ]; then corepack enable && pnpm install --frozen-lockfile; elif [ -f yarn.lock ]; then corepack enable && yarn install --immutable; fi", "if [ -f package.json ]; then npm run build --if-present; fi"],
-    test: ["cd /workspace/source", "if [ -f package.json ]; then npm test --if-present; fi"],
-    security: ["trivy fs --exit-code 1 --no-progress /workspace/source"],
-    image: ["/kaniko/executor --context=/workspace/source --destination=$(params.image) --cache=true"],
+    source: ["rm -rf /workspace/source/*", "git clone " + String(config.repository || "$(params.repository)") + " /workspace/source"],
+    build: ["cd /workspace/source", "if [ -f package-lock.json ]; then npm ci; elif [ -f pnpm-lock.yaml ]; then corepack enable && pnpm install --frozen-lockfile; elif [ -f yarn.lock ]; then corepack enable && yarn install --immutable; fi", String(config.command || "if [ -f package.json ]; then npm run build --if-present; fi")],
+    test: ["cd /workspace/source", String(config.testCommand || "if [ -f package.json ]; then npm test --if-present; fi")],
+    security: [String(config.failOn === "Never" ? "trivy fs --exit-code 0 --no-progress /workspace/source" : "trivy fs --exit-code 1 --severity HIGH,CRITICAL --no-progress /workspace/source")],
+    image: ["/kaniko/executor --context=/workspace/source --destination=" + String(config.image || "$(params.image)") + ":" + String(config.tag || "latest") + " --cache=true"],
     deploy: ["if [ -d /workspace/source/k8s ]; then kubectl apply -f /workspace/source/k8s; elif [ -d /workspace/source/kubernetes ]; then kubectl apply -f /workspace/source/kubernetes; else echo 'No Kubernetes manifests found'; exit 1; fi"],
     approval: ["echo 'Approval gate passed'"],
   };

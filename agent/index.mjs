@@ -106,6 +106,45 @@ async function executeCommand(command) {
     return { operation: command.type, namespace: targetNamespace, resources: results };
   }
 
+  if (command.type === "test-integration") {
+    const integration = String(payload.integration || "");
+    const serverUrl = String(payload.serverUrl || "").replace(/\\/$/, "");
+    if (!["sonarqube", "sonarcloud"].includes(integration)) {
+      return { operation: command.type, status: "ready", message: "No external connection is required for this integration." };
+    }
+    if (!/^https?:\\/\\//i.test(serverUrl)) throw new Error("Invalid integration URL");
+
+    let tokenValue = "";
+    if (payload.credentialSecret) {
+      const secretName = String(payload.credentialSecret);
+      if (!validName(secretName)) throw new Error("Invalid credential Secret name");
+      const secret = await kube(`/api/v1/namespaces/${encodeURIComponent(targetNamespace)}/secrets/${encodeURIComponent(secretName)}`);
+      const encoded = secret?.data?.SONAR_TOKEN;
+      if (!encoded) throw new Error(`Secret ${secretName} does not contain SONAR_TOKEN`);
+      tokenValue = Buffer.from(encoded, "base64").toString("utf8");
+    }
+
+    const headers = { Accept: "application/json" };
+    if (tokenValue) headers.Authorization = `Bearer ${tokenValue}`;
+    const endpoint = integration === "sonarqube" ? `${serverUrl}/api/system/status` : `${serverUrl}/api/system/status`;
+    const response = await fetch(endpoint, { headers, signal: AbortSignal.timeout(10000) });
+    const textBody = await response.text();
+    if (!response.ok) {
+      throw new Error(`${integration} returned HTTP ${response.status}${textBody ? `: ${textBody.slice(0, 180)}` : ""}`);
+    }
+    let body = null;
+    try { body = JSON.parse(textBody); } catch {}
+    return {
+      operation: command.type,
+      status: "connected",
+      integration,
+      serverUrl,
+      systemStatus: body?.status || "UP",
+      credentialValidated: Boolean(tokenValue),
+      testedAt: new Date().toISOString(),
+    };
+  }
+
   if (command.type === "get-pipelinerun") {
     const name = String(payload.name || "").trim();
     if (!validName(name)) throw new Error("Invalid PipelineRun name");

@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
-function tektonName(value: string) {\n  return value.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "tekforge-pipeline";\n}
+function tektonName(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "tekforge-pipeline";
+}
 
 export async function GET(request: Request) {
   const projectId = new URL(request.url).searchParams.get("projectId");

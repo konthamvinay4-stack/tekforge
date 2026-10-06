@@ -69,6 +69,8 @@ export default function PipelineStudio() {
   const [runId, setRunId] = useState("");
   const [runStatus, setRunStatus] = useState("not_started");
   const [runAgent, setRunAgent] = useState<any>(null);
+  const [clusters, setClusters] = useState<any[]>([]);
+  const [applications, setApplications] = useState<any[]>([]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);

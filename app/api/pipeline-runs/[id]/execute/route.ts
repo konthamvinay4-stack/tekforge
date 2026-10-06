@@ -28,7 +28,6 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const params = [
       { name: "repo-url", value: application.repository_url },
       { name: "revision", value: run.branch || application.default_branch || "main" },
-      ...(run.commit_sha ? [{ name: "commit-sha", value: run.commit_sha }] : []),
       ...(application.image_repository ? [{ name: "image", value: application.image_repository }] : []),
       { name: "test-command", value: application.test_command || "" },
     ];
@@ -36,7 +35,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const { data: command, error: commandError } = await supabase.from("agent_commands").insert({
       cluster_id: clusterId,
       type: "create-pipelinerun",
-      payload: { pipelineName, namespace: executionNamespace, params },
+      payload: { pipelineRunId: id, pipelineName, namespace: executionNamespace, params },
       status: "queued",
     }).select("id,status").single();
 

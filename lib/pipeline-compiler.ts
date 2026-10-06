@@ -1,4 +1,4 @@
-export type PipelineStageType = "source" | "build" | "test" | "security" | "image" | "deploy" | "approval";
+export type PipelineStageType = "trigger" | "source" | "build" | "test" | "security" | "image" | "deploy" | "helm" | "gitops" | "verify" | "approval" | "notify" | "rollback";
 
 export type TektonResource = Record<string, unknown>;
 
@@ -18,22 +18,34 @@ function taskFor(node: PipelineGraph["nodes"][number]) {
   const config = node.config || {};
   const name = safeName(node.id);
   const imageByType: Record<PipelineStageType, string> = {
+    trigger: "alpine:3.22",
     source: "alpine/git:2.47.2",
     build: "node:22-bookworm-slim",
     test: "node:22-bookworm-slim",
     security: "aquasec/trivy:0.66.0",
     image: "gcr.io/kaniko-project/executor:v1.24.0",
     deploy: "bitnami/kubectl:1.33",
+    helm: "alpine/helm:3.18.4",
+    gitops: "alpine:3.22",
+    verify: "bitnami/kubectl:1.33",
     approval: "alpine:3.22",
+    notify: "curlimages/curl:8.15.0",
+    rollback: "bitnami/kubectl:1.33",
   };
   const commandByType: Record<PipelineStageType, string[]> = {
+    trigger: ["echo Pipeline triggered"],
     source: ["rm -rf /workspace/source/*", "git clone " + String(config.repository || "$(params.repository)") + " /workspace/source"],
     build: ["cd /workspace/source", "if [ -f package-lock.json ]; then npm ci; elif [ -f pnpm-lock.yaml ]; then corepack enable && pnpm install --frozen-lockfile; elif [ -f yarn.lock ]; then corepack enable && yarn install --immutable; fi", String(config.command || "if [ -f package.json ]; then npm run build --if-present; fi")],
     test: ["cd /workspace/source", String(config.testCommand || "if [ -f package.json ]; then npm test --if-present; fi")],
     security: [String(config.failOn === "Never" ? "trivy fs --exit-code 0 --no-progress /workspace/source" : "trivy fs --exit-code 1 --severity HIGH,CRITICAL --no-progress /workspace/source")],
     image: ["/kaniko/executor --context=/workspace/source --destination=" + String(config.image || "$(params.image)") + ":" + String(config.tag || "latest") + " --cache=true"],
     deploy: ["if [ -d /workspace/source/k8s ]; then kubectl apply -f /workspace/source/k8s; elif [ -d /workspace/source/kubernetes ]; then kubectl apply -f /workspace/source/kubernetes; else echo 'No Kubernetes manifests found'; exit 1; fi"],
-    approval: ["echo 'Approval gate passed'"],
+    helm: ["helm upgrade --install " + String(config.release || "tekforge-app") + " " + String(config.chart || "./helm") + " --namespace " + String(config.namespace || "default") + " --create-namespace"],
+    gitops: ["echo GitOps sync requested for " + String(config.application || "application")],
+    verify: ["kubectl rollout status deployment --timeout=" + String(config.timeout || "10m")],
+    approval: ["echo Approval gate passed"],
+    notify: ["echo Notification requested"],
+    rollback: ["echo Rollback requested"],
   };
 
   return `apiVersion: tekton.dev/v1\nkind: Task\nmetadata:\n  name: ${name}\nspec:\n  params:\n    - name: repository\n      type: string\n    - name: image\n      type: string\n  workspaces:\n    - name: source\n  steps:\n    - name: ${name}\n      image: ${imageByType[node.type]}\n      workingDir: /workspace/source\n      script: |\n${commandByType[node.type].map((line) => `        ${line}`).join("\n")}\n`;

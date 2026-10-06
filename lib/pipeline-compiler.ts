@@ -14,6 +14,22 @@ function safeName(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "stage";
 }
 
+const imageByType: Record<PipelineStageType, string> = {
+  trigger: "alpine:3.22",
+  source: "alpine/git:2.47.2",
+  build: "node:22-bookworm-slim",
+  test: "node:22-bookworm-slim",
+  security: "aquasec/trivy:0.66.0",
+  image: "gcr.io/kaniko-project/executor:v1.24.0",
+  deploy: "bitnami/kubectl:1.33",
+  helm: "alpine/helm:3.18.4",
+  gitops: "alpine:3.22",
+  verify: "bitnami/kubectl:1.33",
+  approval: "alpine:3.22",
+  notify: "curlimages/curl:8.15.0",
+  rollback: "bitnami/kubectl:1.33",
+};
+
 function scriptFor(node: PipelineGraph["nodes"][number]) {
   const config = node.config || {};
   const timeout = String(config.timeout || "10m");
@@ -43,7 +59,7 @@ function scriptFor(node: PipelineGraph["nodes"][number]) {
       return ["/kaniko/executor --context=/workspace/source --destination=" + String(config.image || "$(params.image)") + ":" + String(config.tag || "latest") + " --cache=true"];
     case "deploy":
       return [
-        "if [ -d /workspace/source/" + manifestPath.replace(/^\/+/, "") + " ]; then kubectl apply -f /workspace/source/" + manifestPath.replace(/^\/+/, ") + " -R; else echo 'Deployment manifest path not found: " + manifestPath.replace(/'/g, "'\\''") + "'; exit 1; fi",
+        "if [ -d /workspace/source/" + manifestPath.replace(/^\/+/, "") + " ]; then kubectl apply -f /workspace/source/" + manifestPath.replace(/^\/+/, "") + " -R; else echo 'Deployment manifest path not found: " + manifestPath.replace(/'/g, "'\\''") + "'; exit 1; fi",
       ];
     case "helm":
       return [
@@ -73,21 +89,6 @@ function scriptFor(node: PipelineGraph["nodes"][number]) {
 }
 
 function taskFor(node: PipelineGraph["nodes"][number]) {
-  const imageByType: Record<PipelineStageType, string> = {
-    trigger: "alpine:3.22",
-    source: "alpine/git:2.47.2",
-    build: "node:22-bookworm-slim",
-    test: "node:22-bookworm-slim",
-    security: "aquasec/trivy:0.66.0",
-    image: "gcr.io/kaniko-project/executor:v1.24.0",
-    deploy: "bitnami/kubectl:1.33",
-    helm: "alpine/helm:3.18.4",
-    gitops: "alpine:3.22",
-    verify: "bitnami/kubectl:1.33",
-    approval: "alpine:3.22",
-    notify: "curlimages/curl:8.15.0",
-    rollback: "bitnami/kubectl:1.33",
-  };
   const lines = scriptFor(node);
   return `apiVersion: tekton.dev/v1
 kind: Task
@@ -183,12 +184,7 @@ export function compileToTekton(graph: PipelineGraph, pipelineName = "tekforge-g
     spec: {
       params: [{ name: "repository", type: "string" }, { name: "image", type: "string" }],
       workspaces: [{ name: "source" }],
-      steps: [{ name: safeName(node.id), image: ({
-        trigger: "alpine:3.22", source: "alpine/git:2.47.2", build: "node:22-bookworm-slim", test: "node:22-bookworm-slim",
-        security: "aquasec/trivy:0.66.0", image: "gcr.io/kaniko-project/executor:v1.24.0", deploy: "bitnami/kubectl:1.33",
-        helm: "alpine/helm:3.18.4", gitops: "alpine:3.22", verify: "bitnami/kubectl:1.33", approval: "alpine:3.22",
-        notify: "curlimages/curl:8.15.0", rollback: "bitnami/kubectl:1.33",
-      } as Record<PipelineStageType, string[]>)[node.type] as unknown as string, workingDir: "/workspace/source", script: "#!/bin/sh\nset -eu\n" + scriptFor(node).join("\n") }],
+      steps: [{ name: safeName(node.id), image: imageByType[node.type], workingDir: "/workspace/source", script: "#!/bin/sh\nset -eu\n" + scriptFor(node).join("\n") }],
     },
   }));
 

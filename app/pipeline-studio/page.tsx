@@ -107,13 +107,13 @@ function StageCard({ data, selected }: NodeProps<StageNode>) {
 }
 
 function nodeSummary(node: StageData) {
-  const c = node.data.config || {};
-  if (node.data.type === "source") return c.repository ? c.repository.replace(/^https?:\/\//, "") : "Configure repository";
-  if (node.data.type === "build") return c.command || "Configure build command";
-  if (node.data.type === "test") return c.testCommand || "Configure tests";
-  if (node.data.type === "security") return Array.isArray(c.scanners) ? c.scanners.join(" · ") : "Configure scanner";
-  if (node.data.type === "image") return c.image ? `${c.image}:${c.tag || "latest"}` : "Configure image";
-  if (node.data.type === "deploy") return `${c.target || "Kubernetes"} · ${c.namespace || "default"}`;
+  const c = node.config || {};
+  if (node.type === "source") return c.repository ? c.repository.replace(/^https?:\/\//, "") : "Configure repository";
+  if (node.type === "build") return c.command || "Configure build command";
+  if (node.type === "test") return c.testCommand || "Configure tests";
+  if (node.type === "security") return Array.isArray(c.scanners) ? c.scanners.join(" · ") : "Configure scanner";
+  if (node.type === "image") return c.image ? `${c.image}:${c.tag || "latest"}` : "Configure image";
+  if (node.type === "deploy") return `${c.target || "Kubernetes"} · ${c.namespace || "default"}`;
   return c.environment ? `Gate · ${c.environment}` : "Configure approval";
 }
 

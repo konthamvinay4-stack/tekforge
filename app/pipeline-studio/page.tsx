@@ -112,7 +112,7 @@ function createNode(def: StageDefinition, index: number): StageNode {
   };
 }
 
-const initialNodes: StageNode[] = definitions.slice(1, 8).map(createNode);
+const initialNodes: StageNode[] = definitions.slice(1, 9).map(createNode);
 const initialEdges: Edge[] = initialNodes.slice(0, -1).map((node, index) => ({
   id: `${node.id}-${initialNodes[index + 1].id}`,
   source: node.id,
@@ -199,26 +199,39 @@ export default function PipelineStudio() {
     ]).then(([clusterData, appData, pipelineData]) => {
       setClusters(clusterData.clusters || []);
       setApplications(appData.applications || []);
-      if (!app && appData.applications?.[0]) setApplicationId(appData.applications[0].id);
-      if (pipeline && pipelineData.pipelines) {
-        const existing = pipelineData.pipelines.find((item: any) => item.id === pipeline);
-        const graph = existing?.spec?.graph;
-        if (graph?.nodes?.length) {
-          setPipelineName(existing.name || "tekforge-pipeline");
-          setRuntime(graph.runtime || "nodejs-22");
-          setEnvironment(graph.environment || "production");
-          const restored = graph.nodes.map((node: any, index: number) => ({
-            id: node.id,
-            type: "stage",
-            position: { x: 100 + (index % 3) * 300, y: 80 + Math.floor(index / 3) * 190 },
-            data: { label: node.label, detail: node.detail || definitions.find((d) => d.type === node.type)?.detail || "", type: node.type, config: node.config || definitions.find((d) => d.type === node.type)?.defaults || {} },
-          })) as StageNode[];
-          setNodes(restored);
-          setEdges((graph.edges || []).map((edge: any) => ({ id: `${edge.from}-${edge.to}`, source: edge.from, target: edge.to })));
-          setSelectedId(restored[0]?.id || "");
-        }
-      }
-    });
+      const selectedApplication = (app ? appData.applications : []).find((item: any) => item.id === app) || (!app ? appData.applications?.[0] : null);
+      const applicationPipelines = selectedApplication
+        ? (pipelineData.pipelines || []).filter((item: any) => item.application_id === selectedApplication.id)
+        : [];
+      const existing = pipeline
+        ? pipelineData.pipelines?.find((item: any) => item.id === pipeline)
+        : applicationPipelines[0];
+      if (selectedApplication) setApplicationId(selectedApplication.id);
+      if (existing) setPipelineId(existing.id);
+
+      const graph = existing?.spec?.graph;
+      if (graph?.nodes?.length) {
+        setPipelineName(existing.name || (selectedApplication?.name ? selectedApplication.name + "-ci" : "tekforge-pipeline"));
+        setRuntime(graph.runtime || "nodejs-22");
+        setEnvironment(graph.environment || "production");
+        const restored = graph.nodes.map((node: any, index: number) => ({
+          id: node.id,
+          type: "stage",
+          position: { x: 100 + (index % 3) * 300, y: 80 + Math.floor(index / 3) * 190 },
+          data: { label: node.label, detail: node.detail || definitions.find((d) => d.type === node.type)?.detail || "", type: node.type, config: node.config || definitions.find((d) => d.type === node.type)?.defaults || {} },
+        })) as StageNode[];
+        const bound = selectedApplication ? restored.map((node) => node.data.type === "source"
+          ? { ...node, data: { ...node.data, config: { ...node.data.config, repository: selectedApplication.repository_url, branch: selectedApplication.default_branch || "main" } } }
+          : node) : restored;
+        setNodes(bound);
+        setEdges((graph.edges || []).map((edge: any) => ({ id: edge.from + "-" + edge.to, source: edge.from, target: edge.to })));
+        setSelectedId(bound[0]?.id || "");
+      } else if (selectedApplication) {
+        setPipelineName(selectedApplication.name + "-ci");
+        setNodes((current) => current.map((node) => node.data.type === "source"
+          ? { ...node, data: { ...node.data, config: { ...node.data.config, repository: selectedApplication.repository_url, branch: selectedApplication.default_branch || "main" } } }
+          : node));
+      }    });
   }, [setEdges, setNodes]);
 
   useEffect(() => {
@@ -394,7 +407,7 @@ export default function PipelineStudio() {
 
   function graphPayload() {
     return {
-      version: 3,
+      version: 4,
       runtime,
       environment,
       nodes: nodes.map((node) => ({ id: node.id, type: node.data.type, label: node.data.label, detail: node.data.detail, config: node.data.config })),
@@ -409,7 +422,7 @@ export default function PipelineStudio() {
       const response = await fetch("/api/pipelines", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ applicationId, name: pipelineName, tektonPipelineName: pipelineName, template: "visual", spec: { runtime, environment, graph: graphPayload() } }),
+        body: JSON.stringify({ pipelineId: pipelineId || undefined, applicationId, name: pipelineName, tektonPipelineName: pipelineName, template: "visual", spec: { runtime, environment, graph: graphPayload() } }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Unable to save pipeline");

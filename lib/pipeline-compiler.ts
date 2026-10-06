@@ -1,5 +1,7 @@
 export type PipelineStageType = "source" | "build" | "test" | "security" | "image" | "deploy" | "approval";
 
+export type TektonResource = Record<string, unknown>;
+
 export type PipelineGraph = {
   version: number;
   runtime: string;
@@ -66,8 +68,33 @@ export function compileToTekton(graph: PipelineGraph) {
 
   const pipelineYaml = `apiVersion: tekton.dev/v1\nkind: Pipeline\nmetadata:\n  name: tekforge-generated\n  labels:\n    tekforge.dev/runtime: ${safeName(graph.runtime)}\n    tekforge.dev/environment: ${safeName(graph.environment)}\nspec:\n  params:\n    - name: repository\n      type: string\n    - name: image\n      type: string\n  workspaces:\n    - name: shared-source\n  tasks:\n${pipelineTasks}\n`;
 
+  const pipelineResource = {
+    apiVersion: "tekton.dev/v1",
+    kind: "Pipeline",
+    metadata: { name: "tekforge-generated", labels: { "tekforge.dev/runtime": safeName(graph.runtime), "tekforge.dev/environment": safeName(graph.environment) } },
+    spec: {
+      params: [{ name: "repository", type: "string" }, { name: "image", type: "string" }],
+      workspaces: [{ name: "shared-source" }],
+      tasks: graph.nodes.map((node) => ({
+        name: safeName(node.id), taskRef: { name: safeName(node.id) },
+        params: [{ name: "repository", value: "$(params.repository)" }, { name: "image", value: "$(params.image)" }],
+        workspaces: [{ name: "source", workspace: "shared-source" }],
+        ...(graph.edges.filter((edge) => edge.to === node.id).length ? { runAfter: graph.edges.filter((edge) => edge.to === node.id).map((edge) => safeName(edge.from)) } : {}),
+      })),
+    },
+  };
+  const taskResources = graph.nodes.map((node) => ({
+    apiVersion: "tekton.dev/v1", kind: "Task", metadata: { name: safeName(node.id) },
+    spec: {
+      params: [{ name: "repository", type: "string" }, { name: "image", type: "string" }],
+      workspaces: [{ name: "source" }],
+      steps: [{ name: safeName(node.id), image: imageByType[node.type], workingDir: "/workspace/source", script: "#!/bin/sh\nset -eu\n" + commandByType[node.type].join("\n") }],
+    },
+  }));
+
   return {
     pipelineYaml: `${pipelineYaml}\n---\n${taskYaml}`,
     taskNames: graph.nodes.map((node) => safeName(node.id)),
+    resources: [pipelineResource, ...taskResources],
   };
 }

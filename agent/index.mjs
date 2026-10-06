@@ -110,7 +110,17 @@ async function executeCommand(command) {
     const name = String(payload.name || "").trim();
     if (!validName(name)) throw new Error("Invalid PipelineRun name");
     const resource = await kube(`/apis/tekton.dev/v1/namespaces/${encodeURIComponent(targetNamespace)}/pipelineruns/${encodeURIComponent(name)}`);
-    return { operation: command.type, namespace: targetNamespace, resource };
+    const taskRuns = await optional(`/apis/tekton.dev/v1/namespaces/${encodeURIComponent(targetNamespace)}/taskruns?labelSelector=${encodeURIComponent(`tekton.dev/pipelineRun=${name}`)}`);
+    const tasks = [];
+    for (const task of taskRuns?.items || []) {
+      const podName = task.status?.podName;
+      let logs = "";
+      if (podName) {
+        try { logs = await kube(`/api/v1/namespaces/${encodeURIComponent(targetNamespace)}/pods/${encodeURIComponent(podName)}/log?tailLines=300`); } catch {}
+      }
+      tasks.push({ name: task.metadata?.labels?.["tekton.dev/pipelineTask"] || task.metadata?.name, podName, status: task.status, logs });
+    }
+    return { operation: command.type, namespace: targetNamespace, resource, tasks };
   }
 
   if (command.type === "create-pipelinerun") {

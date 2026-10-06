@@ -136,7 +136,8 @@ export default function PipelineStudio() {
       if (!response.ok) throw new Error(data.error || "Unable to save pipeline");
       setPipelineId(data.pipeline.id);
       setMessage("Pipeline saved.");
-    } catch (e) { setMessage(e instanceof Error ? e.message : "Unable to save pipeline"); }
+      return data.pipeline.id;
+    } catch (e) { setMessage(e instanceof Error ? e.message : "Unable to save pipeline"); return null; }
     finally { setSaving(false); }
   }
 

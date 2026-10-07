@@ -55,7 +55,7 @@ export default function ApplicationPage() {
 
   function editPipeline(pipeline?: Pipeline | null) {
     const query = new URLSearchParams({ applicationId: params.id });
-    if (pipeline?.id) query.set("pipelineId", pipeline.id);
+    if (pipeline?.id) query.set("pipelineId", pipeline.id); else query.set("new", "1");
     router.push("/pipeline-studio?" + query.toString());
   }
 

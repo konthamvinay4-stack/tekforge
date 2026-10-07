@@ -105,6 +105,21 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .health-check { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 6px; background: #eafaf1; color: #1b9a60; }
 .health-footer { display: flex; gap: 6px; align-items: flex-start; margin-top: 12px; padding: 9px; border-radius: 8px; background: #f7f9fc; color: #778498; font-size: 9px; line-height: 1.45; }
 
+.application-page { max-width: 1320px; }
+.application-overview { align-items: stretch; }
+.application-card { padding: 18px; min-width: 0; }
+.application-repository { display: grid; gap: 7px; padding: 13px; border: 1px solid #e5eaf1; border-radius: 9px; background: #fafcff; }
+.application-repository strong { color: #344054; font-size: 11px; overflow-wrap: anywhere; }
+.application-repository span { color: #7d8999; font-size: 9px; }
+.application-primary-pipeline { margin-top: 2px; min-height: 54px; }
+.application-history { margin-top: 14px; }
+.compact-empty { padding: 18px 8px; }
+.compact-empty h2 { font-size: 13px; margin: 0; }
+.compact-empty p { margin: 5px 0 12px; color: #8a95a5; font-size: 9px; }
+.application-page .resource-row { min-width: 0; }
+.application-page .resource-main { min-width: 0; }
+.application-page .resource-main small { overflow-wrap: anywhere; }
+
 .status-dot { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; }
 .status-dot.success { background: #22b573; box-shadow: 0 0 0 3px #e9f9f1; }
 .status-dot.warning { background: #f59e0b; box-shadow: 0 0 0 3px #fff5df; }

@@ -17,6 +17,7 @@ type Application = {
 };
 
 export default function ProjectsPage() {
+  const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [selected, setSelected] = useState<Project | null>(null);
   const [applications, setApplications] = useState<Application[]>([]);

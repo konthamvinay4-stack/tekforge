@@ -59,7 +59,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ pipeline: data, application }, { status: 200 });
   }
 
-  const pipelineName = body.tektonPipelineName || body.name || "node-ci";
+  const pipelineName = tektonName(body.tektonPipelineName || body.name || `${application.id}-pipeline`);
   const { data, error } = await supabase
     .from("pipelines")
     .insert({

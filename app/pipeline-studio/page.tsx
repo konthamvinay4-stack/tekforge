@@ -187,6 +187,115 @@ export default function PipelineStudio() {
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<{ state: "idle" | "testing" | "connected" | "failed"; message?: string }>({ state: "idle" });
 
+  function hydratePipeline(existing: any, selectedApp: any) {
+    if (existing) {
+      setPipelineId(existing.id);
+      setPipelineName(existing.name || "tekforge-pipeline");
+    } else {
+      setPipelineId("");
+      setPipelineName(selectedApp ? `${selectedApp.name}-delivery` : "tekforge-pipeline");
+    }
+
+    const graph = existing?.spec?.graph;
+    if (graph?.nodes?.length) {
+      setEnvironment(graph.environment || "production");
+
+      const restored = graph.nodes.map((node: any, index: number) => ({
+        id: node.id,
+        type: "stage",
+        position: { x: 100 + (index % 3) * 300, y: 80 + Math.floor(index / 3) * 190 },
+        data: {
+          label: node.label,
+          detail: node.detail || definitions.find((d) => d.type === node.type)?.detail || "",
+          type: node.type,
+          config: node.config || definitions.find((d) => d.type === node.type)?.defaults || {},
+        },
+      })) as StageNode[];
+
+      // Application identity is authoritative for repository execution.
+      if (selectedApp) {
+        const buildCommand = selectedApp.build_command || "";
+        const testCommand = selectedApp.test_command || "";
+        for (const node of restored) {
+          if (node.data.type === "source") {
+            node.data.config = {
+              ...node.data.config,
+              repository: selectedApp.repository_url,
+              branch: selectedApp.default_branch || "main",
+            };
+          }
+          if (node.data.type === "build" && buildCommand) {
+            node.data.config = { ...node.data.config, buildTool: selectedApp.build_tool || node.data.config.buildTool, command: buildCommand };
+          }
+          if (node.data.type === "test" && testCommand) {
+            node.data.config = { ...node.data.config, testCommand };
+          }
+        }
+        setRuntime(`${selectedApp.runtime || "nodejs"}-${selectedApp.runtime_version || "22"}`);
+      } else {
+        setRuntime(graph.runtime || "nodejs-22");
+      }
+
+      setNodes(restored);
+      setEdges((graph.edges || []).map((edge: any) => ({ id: edge.from + "-" + edge.to, source: edge.from, target: edge.to })));
+      setSelectedId(restored[0]?.id || "");
+      return;
+    }
+
+    const freshNodes = initialNodes.map((node) => ({
+      ...node,
+      data: { ...node.data, config: { ...node.data.config } },
+    })) as StageNode[];
+
+    if (selectedApp) {
+      setRuntime(`${selectedApp.runtime || "nodejs"}-${selectedApp.runtime_version || "22"}`);
+      for (const node of freshNodes) {
+        if (node.data.type === "source") {
+          node.data.config = {
+            ...node.data.config,
+            repository: selectedApp.repository_url,
+            branch: selectedApp.default_branch || "main",
+          };
+        }
+        if (node.data.type === "build" && selectedApp.build_command) {
+          node.data.config = { ...node.data.config, command: selectedApp.build_command };
+        }
+        if (node.data.type === "test" && selectedApp.test_command) {
+          node.data.config = { ...node.data.config, testCommand: selectedApp.test_command };
+        }
+      }
+    }
+
+    setNodes(freshNodes);
+    setEdges(initialEdges.map((edge) => ({ ...edge })));
+    setSelectedId(freshNodes[0]?.id || "");
+  }
+
+  async function switchApplication(nextApplicationId: string) {
+    const selectedApp = applications.find((item) => item.id === nextApplicationId);
+    setApplicationId(nextApplicationId);
+    setRunId("");
+    setRunStatus("not_started");
+    setMessage("");
+
+    if (!selectedApp) {
+      setPipelineId("");
+      setPipelineName("tekforge-pipeline");
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/pipelines?applicationId=${encodeURIComponent(nextApplicationId)}`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Unable to load application pipelines");
+      const available = data.pipelines || [];
+      hydratePipeline(available[0] || null, selectedApp);
+      setMessage(available.length ? `Loaded ${available[0].name} for ${selectedApp.name}.` : `No pipeline exists for ${selectedApp.name}; starting a new pipeline.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to load application pipelines");
+    }
+  }
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const app = params.get("applicationId") || "";
@@ -194,6 +303,7 @@ export default function PipelineStudio() {
     const isNew = params.get("new") === "1";
     setApplicationId(app);
     setPipelineId(isNew ? "" : requestedPipeline);
+
     Promise.all([
       fetch("/api/agent/clusters", { cache: "no-store" }).then((r) => r.json()).catch(() => ({ clusters: [] })),
       fetch("/api/applications", { cache: "no-store" }).then((r) => r.json()).catch(() => ({ applications: [] })),
@@ -201,37 +311,32 @@ export default function PipelineStudio() {
     ]).then(([clusterData, appData, pipelineData]) => {
       setClusters(clusterData.clusters || []);
       setApplications(appData.applications || []);
-      const selectedApp = app ? (appData.applications || []).find((item: any) => item.id === app) : (appData.applications || [])[0];
-      if (!app && selectedApp) setApplicationId(selectedApp.id);
-      const availablePipelines = pipelineData.pipelines || [];
-      const existingPipelineId = !isNew ? (requestedPipeline || availablePipelines[0]?.id || "") : "";
-      if (existingPipelineId) {
-        setPipelineId(existingPipelineId);
-        const existing = availablePipelines.find((item: any) => item.id === existingPipelineId);
-        const graph = existing?.spec?.graph;
-        if (existing) setPipelineName(existing.name || "tekforge-pipeline");
-        if (graph?.nodes?.length) {
-          setRuntime(graph.runtime || "nodejs-22");
-          setEnvironment(graph.environment || "production");
-          const restored = graph.nodes.map((node: any, index: number) => ({
-            id: node.id,
-            type: "stage",
-            position: { x: 100 + (index % 3) * 300, y: 80 + Math.floor(index / 3) * 190 },
-            data: { label: node.label, detail: node.detail || definitions.find((d) => d.type === node.type)?.detail || "", type: node.type, config: node.config || definitions.find((d) => d.type === node.type)?.defaults || {} },
-          })) as StageNode[];
-          setNodes(restored);
-          setEdges((graph.edges || []).map((edge: any) => ({ id: `${edge.from}-${edge.to}`, source: edge.from, target: edge.to })));
-          setSelectedId(restored[0]?.id || "");
-        } else if (selectedApp) {
-          setNodes((current) => current.map((node) => node.data.type === "source" ? { ...node, data: { ...node.data, config: { ...node.data.config, repository: selectedApp.repository_url, branch: selectedApp.default_branch || "main" } } } : node));
-        }
-      } else if (selectedApp) {
-        setPipelineName(`${selectedApp.name}-delivery`);
-        setRuntime(`${selectedApp.runtime || "nodejs"}-${selectedApp.runtime_version || "22"}`);
-        setNodes((current) => current.map((node) => node.data.type === "source" ? { ...node, data: { ...node.data, config: { ...node.data.config, repository: selectedApp.repository_url, branch: selectedApp.default_branch || "main" } } } : node));
-      }
-    });  }, [setEdges, setNodes]);
 
+      const selectedApp = app
+        ? (appData.applications || []).find((item: any) => item.id === app)
+        : (appData.applications || [])[0];
+
+      if (!selectedApp) {
+        setMessage("The selected application could not be found.");
+        return;
+      }
+
+      if (!app) setApplicationId(selectedApp.id);
+
+      const availablePipelines = pipelineData.pipelines || [];
+      const requestedExists = requestedPipeline && availablePipelines.some((item: any) => item.id === requestedPipeline);
+      const existingPipeline = !isNew
+        ? (requestedExists ? availablePipelines.find((item: any) => item.id === requestedPipeline) : availablePipelines[0])
+        : null;
+
+      // Never hydrate a pipeline from another application. The list above is already scoped by applicationId.
+      if (requestedPipeline && !requestedExists) {
+        setMessage("The requested pipeline does not belong to this application. Loaded this application's pipeline instead.");
+      }
+
+      hydratePipeline(existingPipeline, selectedApp);
+    });
+  }, [setEdges, setNodes]);
   useEffect(() => {
     if (!runId) return;
     const poll = async () => {
@@ -585,7 +690,7 @@ export default function PipelineStudio() {
 
         <aside className="stage-inspector">
           <div className="inspector-head"><div><div className="panel-kicker">CONFIGURATION</div><h2>{selected ? "Stage settings" : "Pipeline settings"}</h2></div><span className="inspector-state">LIVE</span></div>
-          {!selected ? <div className="pipeline-settings"><Field label="Application"><select value={applicationId} onChange={(e) => setApplicationId(e.target.value)}><option value="">Select application</option>{applications.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}</select></Field><Field label="Runtime"><select value={runtime} onChange={(e) => setRuntime(e.target.value)}><option value="nodejs-22">Node.js 22</option><option value="java-21">Java 21</option><option value="python-3.12">Python 3.12</option><option value="go-1.24">Go 1.24</option></select></Field><Field label="Environment"><select value={environment} onChange={(e) => setEnvironment(e.target.value)}><option>development</option><option>qa</option><option>staging</option><option>production</option></select></Field><Field label="Execution cluster"><select value={clusterId} onChange={(e) => setClusterId(e.target.value)}><option value="">Select connected agent</option>{clusters.map((cluster) => <option key={cluster.id} value={cluster.id}>{cluster.name} · {cluster.status}</option>)}</select></Field><Field label="Namespace"><input value={namespace} onChange={(e) => setNamespace(e.target.value)} placeholder="tekforge" /></Field><div className="settings-note">Pipeline settings apply to the whole graph. Select a stage to configure its individual behavior.</div><div className="run-actions"><button className="secondary wide-button" disabled={saving} onClick={savePipeline}>Save pipeline</button><button className="compile-button wide-button" disabled={saving} onClick={deployPipeline}>{saving ? "Deploying…" : "Deploy pipeline"}</button><button className="run-button wide-button" disabled={saving || !pipelineId} onClick={runPipeline}>Run pipeline</button></div></div> : inspector()}
+          {!selected ? <div className="pipeline-settings"><Field label="Application"><select value={applicationId} onChange={(e) => switchApplication(e.target.value)}><option value="">Select application</option>{applications.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}</select></Field><Field label="Runtime"><select value={runtime} onChange={(e) => setRuntime(e.target.value)}><option value="nodejs-22">Node.js 22</option><option value="java-21">Java 21</option><option value="java-14">Java 14</option><option value="python-3.12">Python 3.12</option><option value="go-1.24">Go 1.24</option></select></Field><Field label="Environment"><select value={environment} onChange={(e) => setEnvironment(e.target.value)}><option>development</option><option>qa</option><option>staging</option><option>production</option></select></Field><Field label="Execution cluster"><select value={clusterId} onChange={(e) => setClusterId(e.target.value)}><option value="">Select connected agent</option>{clusters.map((cluster) => <option key={cluster.id} value={cluster.id}>{cluster.name} · {cluster.status}</option>)}</select></Field><Field label="Namespace"><input value={namespace} onChange={(e) => setNamespace(e.target.value)} placeholder="tekforge" /></Field><div className="settings-note">Pipeline settings apply to the whole graph. Select a stage to configure its individual behavior.</div><div className="run-actions"><button className="secondary wide-button" disabled={saving} onClick={savePipeline}>Save pipeline</button><button className="compile-button wide-button" disabled={saving} onClick={deployPipeline}>{saving ? "Deploying…" : "Deploy pipeline"}</button><button className="run-button wide-button" disabled={saving || !pipelineId} onClick={runPipeline}>Run pipeline</button></div></div> : inspector()}
           {message && <div className="studio-message">{message}</div>}
           {runId && <div className="live-run"><div className="panel-kicker">LIVE RUN</div><div className="run-status"><span className={`run-dot ${runStatus}`} />{runStatus}</div><small>{runId}</small>{runAgent?.tasks?.length ? <div className="run-tasks">{runAgent.tasks.map((task: any) => <div key={task.name}><strong>{task.name}</strong><span>{task.status?.conditions?.find((x: any) => x.type === "Succeeded")?.reason || "running"}</span></div>)}</div> : null}</div>}
         </aside>

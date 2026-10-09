@@ -124,6 +124,8 @@ spec:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
           runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
 `;
   return new Response(yaml, { headers: { "Content-Type": "text/yaml; charset=utf-8", "Cache-Control": "no-store" } });
 }

@@ -108,11 +108,11 @@ async function executeCommand(command) {
 
   if (command.type === "test-integration") {
     const integration = String(payload.integration || "");
-    const serverUrl = String(payload.serverUrl || "").replace(/\\/$/, "");
+    const serverUrl = String(payload.serverUrl || "").replace(/\/$/, "");
     if (!["sonarqube", "sonarcloud"].includes(integration)) {
       return { operation: command.type, status: "ready", message: "No external connection is required for this integration." };
     }
-    if (!/^https?:\\/\\//i.test(serverUrl)) throw new Error("Invalid integration URL");
+    if (!/^https?:\/\//i.test(serverUrl)) throw new Error("Invalid integration URL");
 
     let tokenValue = "";
     if (payload.credentialSecret) {
